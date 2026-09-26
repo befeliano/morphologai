@@ -1,0 +1,7 @@
+backend
+*.py
+__pycache__
+# Geliştirme ve test dosyaları yayına alınmaz (yerelde tools/serve.ps1 ile açılır)
+dev
+README.md
+.env*

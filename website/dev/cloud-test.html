@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Bulut Testleri — MorphologAI</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p { color: #475569; font-size: 14px; max-width: 900px; }
+    .sum { margin: 10px 0 20px; font-weight: 600; }
+    .ok { color: #047857; } .bad { color: #b91c1c; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border: 1px solid #e2e8f0; }
+    td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #eef2f7; font-size: 13px; vertical-align: top; white-space: pre-wrap; }
+    tr.fail td { background: #fef2f2; }
+  </style>
+</head>
+<body>
+  <h1>Bulut katmanı (Supabase) — uçtan uca testler</h1>
+  <p>supabase/schema.sql tarayıcıda gerçek Postgres'te (PGlite) kurulur; uygulamanın bulut kodu sahte bir Supabase istemcisiyle çalıştırılır. Satır düzeyi güvenlik kuralları "authenticated" rolüyle sınanır. Yalnızca yerel sunucuda (tools/serve.ps1) çalışır.</p>
+  <div class="sum" id="sum">Başlatılıyor…</div>
+  <table><tbody id="rows"></tbody></table>
+  <script type="module" src="./cloud-test.js"></script>
+</body>
+</html>

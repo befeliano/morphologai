@@ -1,0 +1,19 @@
+# Yerel yedekler ve araç klasörleri
+_yedek_*.zip
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Ortam değişkenleri (API anahtarları asla depoya girmemeli)
+.env
+.env.*
+!.env.example
+
+# Vercel / işletim sistemi
+.vercel/
+.DS_Store
+Thumbs.db

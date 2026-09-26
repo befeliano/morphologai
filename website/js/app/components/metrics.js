@@ -1,0 +1,23 @@
+/** İzlenebilir ölçütler (boylamsal grafik, karşılaştırma). */
+export const TREND_METRICS = [
+  { id: 'mluM', label: 'MLU-m (biçimbirim/sözce)', unit: '', get: (s) => s.analysis?.language?.mluM, modules: ['aphasia', 'fluency'] },
+  { id: 'mluW', label: 'MLU-w (sözcük/sözce)', unit: '', get: (s) => s.analysis?.language?.mluW, modules: ['aphasia', 'fluency'] },
+  { id: 'screen', label: 'Afazi tarama göstergesi', unit: '/100', get: (s) => (s.analysis?.screening?.available ? s.analysis.screening.overall : null), modules: ['aphasia'] },
+  { id: 'sps', label: 'Konuşma hızı (hece/sn)', unit: 'hece/sn', get: (s) => s.analysis?.fluency?.sps, modules: ['aphasia', 'fluency'] },
+  { id: 'wpm', label: 'Sözcük/dakika', unit: '', get: (s) => s.analysis?.fluency?.wpm, modules: ['aphasia', 'fluency'] },
+  { id: 'mlr', label: 'Ortalama akış uzunluğu (hece)', unit: 'hece', get: (s) => s.analysis?.fluency?.mlrSyll, modules: ['aphasia', 'fluency'] },
+  { id: 'longPauses', label: 'Uzun duraksama/dk', unit: '/dk', get: (s) => s.analysis?.fluency?.longPausesPerMin, modules: ['aphasia', 'fluency'] },
+  { id: 'mattr', label: 'Sözcük çeşitliliği (MATTR)', unit: '', get: (s) => s.analysis?.language?.mattrForm ?? s.analysis?.language?.ttrForm, modules: ['aphasia'] },
+  { id: 'finitePerUtt', label: 'Sözce başına çekimli fiil', unit: '', get: (s) => s.analysis?.language?.verbs?.finitePerUtterance, modules: ['aphasia'] },
+  { id: 'nv', label: 'İsim/fiil oranı', unit: '', get: (s) => s.analysis?.language?.nounVerbRatio, modules: ['aphasia'] },
+  { id: 'errRate', label: 'Parafazi (100 sözcükte)', unit: '', get: (s) => s.analysis?.language?.errors?.rate, modules: ['aphasia'] },
+  { id: 'pss', label: '%SS (takılmalı hece)', unit: '%', get: (s) => s.analysis?.stuttering?.percentSS, modules: ['fluency'] },
+  { id: 'sld', label: 'SLD / 100 hece', unit: '', get: (s) => s.analysis?.stuttering?.sldPer100, modules: ['fluency'] },
+  { id: 'hnr', label: 'HNR (dB)', unit: 'dB', get: (s) => (s.voice?.ok ? s.voice.hnr : null), modules: ['voice'] },
+  { id: 'jitter', label: 'Jitter local (%)', unit: '%', get: (s) => (s.voice?.ok ? s.voice.jitterLocal : null), modules: ['voice'] },
+  { id: 'shimmer', label: 'Shimmer local (%)', unit: '%', get: (s) => (s.voice?.ok ? s.voice.shimmerLocal : null), modules: ['voice'] },
+  { id: 'cpp', label: 'CPP (dB)', unit: 'dB', get: (s) => (s.voice?.ok ? s.voice.cpp : null), modules: ['voice'] },
+  { id: 'mpt', label: 'Maksimum fonasyon süresi (sn)', unit: 'sn', get: (s) => s.voice?.mptSec ?? s.mpt, modules: ['voice'] },
+  { id: 'ddk', label: 'DDK hızı (hece/sn)', unit: 'hece/sn', get: (s) => (s.ddk?.ok ? s.ddk.rate : null), modules: ['motor'] },
+  { id: 'ddkCv', label: 'DDK düzensizliği (CV %)', unit: '%', get: (s) => (s.ddk?.ok ? s.ddk.cv : null), modules: ['motor'] },
+];

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Motor Testleri — MorphologAI</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sum { margin: 10px 0 20px; font-weight: 600; }
+    .ok { color: #047857; } .bad { color: #b91c1c; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #eef2f7; font-size: 13px; }
+    th { background: #f1f5f9; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+    tr.fail td { background: #fef2f2; }
+    code { font-family: ui-monospace, monospace; }
+    label { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Morfoloji motoru — regresyon testleri</h1>
+  <label><input type="checkbox" id="onlyFail"> Yalnız başarısızları göster</label>
+  <div class="sum" id="sum">Çalışıyor…</div>
+  <table><thead><tr><th>Tür</th><th>Girdi</th><th>Beklenen</th><th>Sonuç</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <script type="module" src="./run.js"></script>
+</body>
+</html>
