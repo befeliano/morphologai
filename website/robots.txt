@@ -1,6 +1,3 @@
+# Kapalı (davetle) kullanım: sitenin hiçbir bölümü arama motorlarında listelenmez
 User-agent: *
-Allow: /$
-Allow: /index.html
-Disallow: /app.html
-Disallow: /dev/
-Disallow: /data/
+Disallow: /

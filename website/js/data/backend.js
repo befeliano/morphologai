@@ -24,6 +24,8 @@ export const backend = {
   error: null,
   /** Parola sıfırlama bağlantısıyla gelindi mi? */
   recovery: false,
+  /** Uygulama içinden kayıt açık mı? (yerel modda her zaman; bulutta yapılandırmaya bağlı) */
+  allowSignup: true,
   /** Testlerde yükleme parça boyutları */
   tuning: null,
   listeners: new Set(),
@@ -99,6 +101,7 @@ export async function initBackend({ client = null, tuning = null } = {}) {
   }
   backend.mode = 'cloud';
   backend.config = { url: sb.url, anonKey: sb.anonKey };
+  backend.allowSignup = typeof cfg?.allowSignup === 'boolean' ? cfg.allowSignup : !!PUBLIC_CLOUD.allowSignup;
   backend.source = source;
   try {
     const { createClient } = await import(LIBS.supabase);

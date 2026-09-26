@@ -5,8 +5,11 @@ import { brandMark } from '../layout.js';
 
 export async function render(root, { mode = 'login' }, app) {
   if (app.ctx && mode === 'login') { app.navigate('/'); return; }
-  const isReg = mode === 'register';
   const cloud = app.backend.isCloud;
+  const signupOpen = !cloud || app.backend.allowSignup;
+  // Kapalı kullanımda kayıt ekranı yok: hesaplar Supabase panelinden açılır
+  if (mode === 'register' && !signupOpen) { app.navigate('/giris', { replace: true }); return; }
+  const isReg = mode === 'register';
   const showHint = !isReg && !cloud && (await defaultAccountHint());
 
   const art = h('section.auth-art', null,
@@ -87,9 +90,11 @@ export async function render(root, { mode = 'login' }, app) {
     h('h1', null, isReg ? 'Hesap oluşturun' : 'Tekrar hoş geldiniz'),
     h('p.sub', null, isReg ? (cloud ? 'Hesabınız ekibinizin bulut veritabanında oluşturulur.' : 'Hesabınız bu tarayıcıda, yerel veritabanında oluşturulur.') : 'Çalışma panelinize giriş yapın.'),
     form,
-    h('p.small.muted', { style: { marginTop: '18px', textAlign: 'center' } },
-      isReg ? 'Zaten hesabınız var mı? ' : 'Hesabınız yok mu? ',
-      h('a', { href: isReg ? '#/giris' : '#/kayit' }, isReg ? 'Giriş yapın' : 'Kayıt olun')),
+    signupOpen
+      ? h('p.small.muted', { style: { marginTop: '18px', textAlign: 'center' } },
+        isReg ? 'Zaten hesabınız var mı? ' : 'Hesabınız yok mu? ',
+        h('a', { href: isReg ? '#/giris' : '#/kayit' }, isReg ? 'Giriş yapın' : 'Kayıt olun'))
+      : h('p.small.muted', { style: { marginTop: '18px', textAlign: 'center' } }, 'Bu panel davetle kullanılır. Hesabınızı ekip yöneticiniz açar.'),
     showHint ? h('div.hint-card', null,
       h('div', { style: { fontWeight: 600, marginBottom: '4px', color: 'var(--text)' } }, 'İlk kurulum hesabı'),
       'E-posta: ', h('b', null, DEFAULT_ACCOUNT.email), h('br'),

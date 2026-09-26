@@ -129,16 +129,25 @@ Sonraki her `push` otomatik yayına alınır.
 
 ---
 
-## 4. İlk kullanım (bulut)
+## 4. İlk kullanım (bulut, davetle — varsayılan)
 
-1. Şevval `…/app.html` → **Kayıt olun** → kendi e-postası.
-   Ekip adı örneği: "Afazi Tez Çalışması". Boş bırakılırsa "Şevval Şahin Ekibi" olur.
-2. Gelen doğrulama e-postasındaki bağlantıya tıklar; uygulamaya dönünce oturum açıktır.
-3. **Hocası için:**
-   - Şevval: **Ekip ve üyeler → Üye ekle** → hocanın e-postası.
-     Rol: *Gözlemci / Araştırmacı* (yalnız görüntüler) ya da *Yönetici*.
-   - Kayıt bağlantısı panelde kopyalanıp hocaya iletilir.
-   - Hoca aynı e-postayla kayıt olup e-postasını doğrulayınca ekibe **otomatik** katılır.
+Uygulama içi kayıt **kapalıdır**: kayıt ekranı görünmez, site arama motorlarında listelenmez.
+Hesapları yalnız sen Supabase panelinden açarsın.
+
+1. **Supabase'de kaydı kapat:** Authentication → Sign In / Providers → **Allow new users to sign up: kapalı**.
+   Asıl güvenlik kilidi budur; uygulamadaki gizleme yalnızca görünümdür.
+2. **Şevval'in hesabı:** Authentication → Users → **Add user → Create new user**.
+   - E-posta ve parola gir.
+   - **Auto Confirm User** kutusunu işaretle.
+3. Şevval `…/app.html` adresinden giriş yapar. İlk girişte kendi ekibi oluşur.
+   Ekip adını **Ekip ve üyeler** ekranından, adını ve unvanını **Ayarlar → Profil** ekranından düzenler.
+4. **Hocası için sıra önemli:**
+   1. Şevval: **Ekip ve üyeler → Üye ekle** → hocanın e-postası.
+      Rol: *Gözlemci / Araştırmacı* ya da *Yönetici*. Bu adım davet oluşturur.
+   2. Sen: Supabase'de aynı e-postaya **Add user** (Auto Confirm işaretli).
+   3. Hoca ilk girişte Şevval'in ekibine **otomatik** katılır; ayrı ekip oluşmaz.
+
+Herkese açık kayda geçmek istersen: Vercel'e `MORPHOLOGAI_ALLOW_SIGNUP=true` ekle ve Supabase'de kaydı yeniden aç.
 4. **Daha önce bu tarayıcıda yerel veri girdiysen:** **Ayarlar → Veri ve yedek → Bu tarayıcıdaki yerel veriler → Buluta aktar.**
 5. **Mac / Safari:** Safari menüsü → **Dosya → Dock'a Ekle**. Uygulama ayrı bir pencerede açılır.
 6. **Yazıya dökme:** **Ayarlar → Kayıt ve transkripsiyon → Modeli indir ve hazırla** ile Whisper modelini bir kez indir.

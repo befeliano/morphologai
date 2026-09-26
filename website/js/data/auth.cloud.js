@@ -69,6 +69,7 @@ async function afterSignIn() {
 }
 
 export async function register({ email, password, name, title, orgName }) {
+  if (!backend.allowSignup) throw new Error('Kayıt kapalı. Hesabınızı ekip yöneticiniz açar.');
   if (!String(name || '').trim()) throw new Error('Ad soyad girin.');
   if (!password || password.length < 8) throw new Error('Parola en az 8 karakter olmalı.');
   const e = normEmail(email);

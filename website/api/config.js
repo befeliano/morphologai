@@ -40,5 +40,7 @@ module.exports = function handler(req, res) {
     res.status(500).json({ supabase: null, error: 'Gizli (service_role) anahtar tanımlanmış. Vercel\'de SUPABASE_ANON_KEY olarak yalnızca anon/publishable anahtarı kullanın.' });
     return;
   }
-  res.status(200).json({ supabase: { url, anonKey: key }, version: 1 });
+  // Uygulama içi kayıt varsayılan olarak kapalıdır (hesaplar Supabase panelinden açılır)
+  const signup = String(env.MORPHOLOGAI_ALLOW_SIGNUP || '').trim().toLowerCase();
+  res.status(200).json({ supabase: { url, anonKey: key }, ...(signup ? { allowSignup: signup === 'true' } : {}), version: 1 });
 };

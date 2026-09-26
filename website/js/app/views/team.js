@@ -49,7 +49,13 @@ export async function render(root, { query }, app) {
     const pw = h('input.input', { value: tempPassword(), style: { fontFamily: 'var(--mono)' } });
     const pwWrap = h('div', null, field('Geçici parola', pw, 'Üyeye iletin; ilk girişte Ayarlar → Profil\'den değiştirmesi önerilir.'));
     create.addEventListener('change', () => { pwWrap.hidden = !create.checked; });
-    const info = cloud
+    const loginUrl = `${location.origin}${location.pathname}`;
+    const info = cloud && !app.backend.allowSignup
+      ? h('div.callout.info', null, icon('lock', 18), h('div', null,
+        h('b', null, 'Panel davetle kullanılıyor. '), 'Kişinin hesabı varsa hemen ekibe eklenir. Yoksa önce burada davet oluşturun, ardından Supabase panelinde ',
+        h('b', null, 'Authentication → Users → Add user → Create new user'), ' ile aynı e-postaya hesap açın ("Auto Confirm User" işaretli). Kişi ilk girişinde ekibe otomatik katılır ve kendi ayrı ekibi oluşmaz. Giriş adresi:',
+        h('div.row.mt-2', null, h('code.mono.small', { style: { wordBreak: 'break-all' } }, loginUrl))))
+      : cloud
       ? h('div.callout.info', null, icon('cloud', 18), h('div', null,
         h('b', null, 'Ekip verileri bulutta ortaktır. '), 'Kişinin MorphologAI hesabı varsa hemen ekibe eklenir. Hesabı yoksa davet oluşturulur; bu e-postayla kayıt olup e-postasını doğruladığında ekibe otomatik katılır. Uygulama e-posta göndermez, kayıt bağlantısını kendiniz iletin.',
         h('div.row.mt-2', null, h('code.mono.small', { style: { wordBreak: 'break-all' } }, signupUrl), h('button.btn.btn-soft.btn-sm', { type: 'button', on: { click: copyLink } }, icon('copy', 14), 'Kopyala'))))
@@ -68,7 +74,7 @@ export async function render(root, { query }, app) {
           label: 'Ekle', variant: 'btn-primary', icon: 'userPlus', onClick: async () => {
             const withAccount = !cloud && create.checked;
             const m = await addMember(app.ctx, { email: email.value, role: role.value, name: name.value, password: withAccount ? pw.value : null });
-            toast(m.status === 'active' ? `${email.value} ekibe eklendi.` : `${email.value} için davet oluşturuldu.${cloud ? ' Kayıt bağlantısını kişiye iletin.' : ''}`, 'success', 7000);
+            toast(m.status === 'active' ? `${email.value} ekibe eklendi.` : `${email.value} için davet oluşturuldu.${cloud ? (app.backend.allowSignup ? ' Kayıt bağlantısını kişiye iletin.' : ' Şimdi Supabase panelinden bu e-postaya hesap açın.') : ''}`, 'success', 7000);
             if (withAccount) {
               modal({ title: 'Giriş bilgileri', body: h('div.stack', null, h('p.small.muted', null, 'Bu bilgileri üyeye güvenli bir yoldan iletin:'),
                 h('div.hint-card', null, 'E-posta: ', h('b', null, email.value.trim().toLocaleLowerCase('tr-TR')), h('br'), 'Parola: ', h('b', null, pw.value))), actions: [{ label: 'Tamam', variant: 'btn-primary' }] });
