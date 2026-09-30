@@ -8,6 +8,7 @@ import { voiceReport } from '../core/audio/voice.js';
 import { ddkAnalysis } from '../core/audio/ddk.js';
 import { analyzeSession, summarize } from '../core/analysis.js';
 import { computeFluency } from '../core/metrics/fluency.js';
+import { PROTOCOL_ID, loadStudyContext, computeStudy, aiSnapshot, updateStudy } from './study.js';
 
 const HEAVY = ['frames', 'peaks', 'f0Track'];
 
@@ -135,6 +136,41 @@ export async function saveSession(app, p) {
     });
   }
   if (heavy) await app.repo.acoustic.put(session.id, heavy);
+
+  // Öngörü çalışması örneklemi: protokol bilgisi ve ilk ölçümler
+  if (p.study) {
+    const study = {
+      protocol: PROTOCOL_ID,
+      wave: p.study.wave === 'followup' ? 'followup' : 'baseline',
+      baselineId: p.study.wave === 'followup' ? p.study.baselineId || null : null,
+      speakers: p.speakers || null,
+      therapistIntervals: p.therapistIntervals || [],
+      ratings: {},
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const sctx = await loadStudyContext(app);
+      const patient = sctx.byId.get(session.patientId) || await app.repo.patients.get(session.patientId);
+      const comp = computeStudy(app, session, patient, sctx);
+      if (comp) {
+        study.features = comp.measures.features;
+        study.detail = comp.measures.detail;
+        study.featuresAt = new Date().toISOString();
+        study.ai = aiSnapshot(comp.scored);
+      }
+    } catch (err) {
+      console.warn('Protokol ölçümleri hesaplanamadı:', err);
+    }
+    session = await app.repo.sessions.save({ ...session, study });
+    // İzlem örneklemini başlangıç örneklemine bağla
+    if (study.wave === 'followup' && study.baselineId) {
+      try {
+        await updateStudy(app, study.baselineId, (s) => { s.followUpId = session.id; });
+      } catch (err) {
+        console.warn('Başlangıç örneklemi güncellenemedi:', err);
+      }
+    }
+  }
   app.refreshCounts();
   return session;
 }

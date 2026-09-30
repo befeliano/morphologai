@@ -12,6 +12,7 @@ import { Recorder, LiveVad, listInputDevices } from '../../core/audio/recorder.j
 import { LiveTranscriber, sttCapabilities, onDeviceStatus, transcribeAudioBuffer, segmentsToTranscript, browserInfo } from '../../core/stt/webspeech.js';
 import { whisperTranscribe, WHISPER_MODELS, hasWebGPU, defaultWhisperModel } from '../../core/stt/whisper.js';
 import { analyzeTranscript } from '../../core/analysis.js';
+import { labelSpeakers } from '../../core/text/speakers.js';
 import { parseWavHeader } from '../../core/audio/wav.js';
 import { analyzeAudio, saveSession } from '../pipeline.js';
 import { fromChat } from '../../export/chat.js';
@@ -31,8 +32,33 @@ export async function render(root, { query }, app) {
     taskType: '',
     taskDetail: '',
     method: query.mode || 'live',
+    // Öngörü çalışması: başlangıç (0. ay) ya da 1 yıl sonraki izlem
+    studyWave: query.study === 'followup' ? 'followup' : 'baseline',
+    baselineId: query.baseline || '',
   };
-  state.taskType = moduleOf(state.module).defaultTask;
+  state.taskType = query.task && moduleOf(state.module).tasks.includes(query.task) ? query.task : moduleOf(state.module).defaultTask;
+  const isStudyRun = () => !!moduleOf(state.module).study && state.taskType === 'accident';
+  const studyPayload = () => (isStudyRun() ? { wave: state.studyWave, baselineId: state.studyWave === 'followup' ? state.baselineId : null } : null);
+
+  /** Uyaran görseli (tam ekran gösterilebilir) — danışana bu resim gösterilir. */
+  const stimulusCard = (task, { big = false } = {}) => {
+    if (!task.stimulus) return null;
+    const img = h('img', { src: task.stimulus, alt: `${task.label} — uyaran görseli`, style: { width: '100%', display: 'block', borderRadius: '12px', background: '#fff', cursor: 'zoom-in' } });
+    const full = () => {
+      const el = img.cloneNode();
+      el.style.cssText = 'width:100%;height:100%;object-fit:contain;background:#fff;cursor:zoom-out';
+      const box = h('div.stimulus-full', null, el);
+      box.addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen?.(); box.remove(); });
+      document.body.appendChild(box);
+      box.requestFullscreen?.().catch(() => {});
+      document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) box.remove(); }, { once: true });
+    };
+    img.addEventListener('click', full);
+    return h('div.card', null,
+      h('div.card-head', null, h('h3', null, icon('eye', 17), 'Uyaran görseli'), h('button.btn.btn-soft.btn-sm', { type: 'button', on: { click: full } }, icon('maximize', 14), 'Tam ekran göster')),
+      h('div.card-body', { style: big ? null : { padding: '12px' } }, img,
+        h('p.tiny.muted.mt-1', null, 'Aynı görsel başlangıçta ve 1 yıl sonraki izlemde kullanılır. Görseli danışana gösterip standart yönergeyi okuyun.')));
+  };
   let cleanupFn = null;
   const cleanup = () => { if (cleanupFn) { cleanupFn(); cleanupFn = null; } };
 
@@ -43,7 +69,7 @@ export async function render(root, { query }, app) {
     const patients = await app.repo.patients.list();
     if (state.patientId && !patients.some((p) => p.id === state.patientId)) state.patientId = '';
 
-    const modGrid = h('div.choice-grid', { style: { gridTemplateColumns: 'repeat(4, minmax(0,1fr))' } });
+    const modGrid = h('div.choice-grid', { style: { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))' } });
     const taskSel = h('select.select');
     const promptBox = h('div.prompt-card');
     const detail = h('input.input', { placeholder: '', value: state.taskDetail });
@@ -94,9 +120,33 @@ export async function render(root, { query }, app) {
       const p = await openPatientForm(app);
       if (p) { patients.push(p); state.patientId = p.id; fillPatients(); }
     });
+    // Öngörü çalışması: dalga (başlangıç / izlem) ve izlemde bağlanacak başlangıç örneklemi
+    const studyBox = h('div');
+    const waveSel = select([{ id: 'baseline', label: 'Başlangıç örneklemi (0. ay)' }, { id: 'followup', label: '1 yıl sonraki izlem örneklemi' }], state.studyWave);
+    const baseSel = h('select.select');
+    const fillBaselines = async () => {
+      const list = state.patientId ? (await app.repo.sessions.list({ patientId: state.patientId })).filter((s) => s.study?.protocol && s.study.wave === 'baseline') : [];
+      if (!list.some((s) => s.id === state.baselineId)) state.baselineId = list[0]?.id || '';
+      mount(baseSel, ...(list.length ? list.map((s) => h('option', { value: s.id, selected: s.id === state.baselineId }, new Date(s.recordedAt).toLocaleDateString('tr-TR', { dateStyle: 'long' })))
+        : [h('option', { value: '' }, 'Bu danışanın başlangıç örneklemi yok')]));
+    };
+    waveSel.addEventListener('change', () => { state.studyWave = waveSel.value; drawStudy(); });
+    baseSel.addEventListener('change', () => { state.baselineId = baseSel.value; });
+    const drawStudy = async () => {
+      if (!moduleOf(state.module).study || state.taskType !== 'accident') { mount(studyBox); return; }
+      await fillBaselines();
+      mount(studyBox, h('div.card.mt-3', null, h('div.card-head', null, h('h2', null, icon('target', 18), 'Öngörü çalışması')),
+        h('div.card-body', null, h('div.form-grid', null, field('Örneklem', waveSel), state.studyWave === 'followup' ? field('Bağlanacak başlangıç örneklemi', baseSel) : null),
+          h('p.small.muted.mt-2', null, 'Kayıttan sonra önce siz (kör olarak) değerlendirip 1 yıllık tahmininizi girersiniz; ardından programın tahmini açılır. 1 yıl sonraki izlemde ikisinin doğruluğu karşılaştırılır.'))));
+    };
+    patSel.addEventListener('change', drawStudy);
+    taskSel.addEventListener('change', drawStudy);
+    modGrid.addEventListener('click', () => setTimeout(drawStudy, 0));
+
     const goBtn = h('button.btn.btn-primary.btn-lg', null, 'Devam et', icon('arrowRight', 18));
     goBtn.addEventListener('click', () => {
       if (!state.patientId) { toast('Lütfen bir danışan seçin ya da ekleyin.', 'warning'); patSel.focus(); return; }
+      if (isStudyRun() && state.studyWave === 'followup' && !state.baselineId) { toast('İzlem için bu danışanın başlangıç örneklemi gerekir.', 'warning'); return; }
       if (state.method === 'live') showLive();
       else if (state.method === 'upload') showUpload();
       else showText();
@@ -106,6 +156,7 @@ export async function render(root, { query }, app) {
     drawModules();
     fillTasks();
     drawMethods();
+    drawStudy();
     app.setActions([]);
     mount(root,
       h('div.page-head', null, h('div', null, h('div.eyebrow', null, icon('plus', 14), 'Yeni seans'), h('h1', null, 'Seans hazırlığı'), h('p', null, 'Klinik modülü, danışanı ve görevi seçin; ardından canlı kayıt, ses dosyası ya da metinle devam edin.'))),
@@ -118,6 +169,7 @@ export async function render(root, { query }, app) {
           h('div.card', null, h('div.card-head', null, h('h2', null, h('span.badge.info', null, '3'), 'Görev')),
             h('div.card-body', null, h('div.form-grid', null, field('Görev türü', taskSel), field('Ayrıntı', detail)), h('div.mt-2', null, promptBox)))),
         h('div.card', null, h('div.card-head', null, h('h2', null, h('span.badge.info', null, '4'), 'Kayıt yöntemi')), h('div.card-body', null, methodGrid)),
+        studyBox,
         h('div.row', { style: { justifyContent: 'flex-end' } }, goBtn)));
   };
 
@@ -157,6 +209,29 @@ export async function render(root, { query }, app) {
     const markerInput = h('input.input', { placeholder: 'Zaman damgalı not… (Enter)', style: { height: '36px' } });
     const markerList = h('div.marker-list');
     const presets = ['İpucu verildi', 'Model sunuldu', 'Görev tekrarlandı', 'Yorgunluk', 'Dikkat dağıldı'];
+
+    // "Terapist konuşuyor" — basılı tutulan aralıklar kesin olarak terapist sözcesi sayılır
+    const therapistIntervals = [];
+    let tStart = null;
+    const tCount = h('span.small.muted', null, '');
+    const tBtn = h('button.btn.btn-ghost.therapist-btn', { type: 'button', disabled: true, title: 'Siz konuşurken basılı tutun (klavyede T tuşu)' }, icon('user', 16), 'Terapist konuşuyor');
+    const tDown = () => {
+      if (!recorder || !recording || paused || tStart != null) return;
+      tStart = recorder.elapsed;
+      tBtn.classList.add('on');
+    };
+    const tUp = () => {
+      if (tStart == null) return;
+      const end = recorder ? recorder.elapsed : tStart;
+      if (end - tStart > 0.15) therapistIntervals.push([Number(tStart.toFixed(2)), Number(end.toFixed(2))]);
+      tStart = null;
+      tBtn.classList.remove('on');
+      tCount.textContent = `${therapistIntervals.length} terapist aralığı işaretlendi`;
+    };
+    tBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); tBtn.setPointerCapture?.(e.pointerId); tDown(); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) tBtn.addEventListener(ev, tUp);
+    const tKeyDown = (e) => { if ((e.key === 't' || e.key === 'T') && !e.repeat && !(e.target.closest && e.target.closest('input, textarea, select'))) { e.preventDefault(); tDown(); } };
+    const tKeyUp = (e) => { if (e.key === 't' || e.key === 'T') tUp(); };
 
     // canlı ölçütler
     const mv = {};
@@ -334,6 +409,7 @@ export async function render(root, { query }, app) {
       paused = false;
       setState('rec');
       pauseBtn.disabled = false;
+      tBtn.disabled = false;
       stopBtn.disabled = false;
       devSel.disabled = true;
       sttOn.disabled = true;
@@ -378,6 +454,8 @@ export async function render(root, { query }, app) {
       micBtn.disabled = true;
       setState('busy');
       recState.lastChild.textContent = 'Son sonuçlar alınıyor…';
+      tUp();
+      tBtn.disabled = true;
       if (transcriber) await transcriber.stop(1800);
       const rec = await recorder.stop();
       recording = false;
@@ -396,6 +474,7 @@ export async function render(root, { query }, app) {
         whisperModel: defaultWhisperModel(app.orgSettings.transcription?.whisperModel),
         segments,
         markers,
+        therapistIntervals,
         source: 'live',
         device: deviceLabel,
         recordedAt: new Date(Date.now() - rec.durationSec * 1000).toISOString(),
@@ -408,9 +487,12 @@ export async function render(root, { query }, app) {
       if (e.code === 'Space' && recorder) { e.preventDefault(); togglePause(); }
     };
     document.addEventListener('keydown', keyHandler);
+    if (mod.transcript) { document.addEventListener('keydown', tKeyDown); document.addEventListener('keyup', tKeyUp); }
     cleanupFn = () => {
       cancelAnimationFrame(raf);
       document.removeEventListener('keydown', keyHandler);
+      document.removeEventListener('keydown', tKeyDown);
+      document.removeEventListener('keyup', tKeyUp);
       try { transcriber?.stop(200); } catch { /* yok say */ }
       if (recorder && recording) recorder.cancel();
       recording = false;
@@ -441,13 +523,15 @@ export async function render(root, { query }, app) {
               mod.transcript ? h('label.switch', null, sttOn, h('span.track'), 'Anlık transkript') : null)),
             h('div.live-center', null,
               h('div.mic-orb', null, orbCanvas, micBtn),
-              h('div', null, timer, h('div.row.mt-2', null, pauseBtn, stopBtn, cancelBtn), silence)),
+              h('div', null, timer, h('div.row.mt-2', null, pauseBtn, stopBtn, cancelBtn), silence,
+                mod.transcript ? h('div.row.mt-2', { style: { gap: '10px' } }, tBtn, tCount) : null)),
             wave,
             sttNote),
           mod.transcript ? h('div.card', null,
             h('div.card-head', null, h('h2', null, icon('fileText', 18), 'Anlık transkript'), h('span.sub', null, 'Her kesin sonuç bir sözcedir; kayıttan sonra düzenleyebilirsiniz')),
             h('div.card-body', null, feed, h('div.mt-2', null, interim))) : null),
         h('div.stack.live-side', null,
+          stimulusCard(task),
           h('div.prompt-card', null, h('div.p-label', null, 'Danışana yönerge'), h('div.p-text', null, task.prompt || '—'), state.taskDetail ? h('div.small.muted.mt-1', null, state.taskDetail) : null),
           sttInfo,
           h('div.card', null, h('div.card-head', null, h('h3', null, icon('activity', 17), 'Canlı göstergeler')), h('div.card-body', null, liveMetrics,
@@ -514,6 +598,7 @@ export async function render(root, { query }, app) {
           segments = await whisperTranscribe(dec.samples, {
             model: p.whisperModel,
             segments: acoustic?.speechSegments,
+            breaks: (p.therapistIntervals || []).flat(),
             onLoad: (v, t) => progress(0.6 + 0.1 * v, t),
             onStatus: (s) => { if (s === 'loading') progress(0.6, 'Whisper modeli yükleniyor…'); if (s === 'fallback') log('Ekran kartı (WebGPU) kullanılamadı; işlemciyle devam ediliyor (daha yavaş).', false); },
             onProgress: (v, t) => progress(0.7 + 0.22 * v, t),
@@ -526,16 +611,33 @@ export async function render(root, { query }, app) {
           log(`Whisper çalıştırılamadı: ${err.message}`, false);
         }
       }
+      // Konuşmacı ayrımı: terapist sözceleri "T:" ile işaretlenir ve ölçütlere katılmaz
+      let speakers = null;
+      if (segments.length && moduleOf(state.module).transcript) {
+        const lab = labelSpeakers(segments, { f0Track: acoustic?.f0Track, therapistIntervals: p.therapistIntervals || [] });
+        segments = lab.segments;
+        speakers = lab.summary;
+        transcriptText = segmentsToTranscript(segments);
+        const src = lab.summary.bySource;
+        log(`Konuşmacı ayrımı: ${lab.summary.examiner} terapist, ${lab.summary.participant} danışan sözcesi (tuş ${src.button}, metin ipucu ${src.text}, ses perdesi ${src.pitch})${lab.summary.pitch ? ` · iki ses: ~${lab.summary.pitch.therapistHz} / ~${lab.summary.pitch.participantHz} Hz` : ''}`);
+      }
       progress(0.92, 'Dil çözümlemesi ve kayıt…');
+      const study = studyPayload();
       const session = await saveSession(app, {
         patientId: state.patientId, module: state.module, taskType: state.taskType, taskDetail: state.taskDetail,
         source: p.source, blob: p.blob, fileName: p.fileName, audioInfo: p.audioInfo, acoustic, measures,
         transcriptText, engine, segments, markers: p.markers || [], device: p.device, recordedAt: p.recordedAt,
+        study, speakers, therapistIntervals: p.therapistIntervals || [],
         onUploadProgress: app.backend.isCloud ? (v) => progress(0.93 + 0.06 * v, `Ses kaydı buluta yükleniyor… %${Math.round(v * 100)}`) : null,
       });
       progress(1, 'Tamamlandı');
       log('Seans kaydedildi');
       app.setGuard(null);
+      if (study) {
+        toast(speakers && speakers.examiner ? 'Örneklem kaydedildi. Terapist sözceleri otomatik ayrıldı; transkripti kontrol edip kör değerlendirmenizi yapın.' : 'Örneklem kaydedildi. Transkripti kontrol edip kör değerlendirmenizi yapın.', txError ? 'warning' : 'success', 8000);
+        app.navigate(`/ongoru/${session.id}`);
+        return;
+      }
       if (txError) toast(`Seans ve ses kaydı kaydedildi, ancak otomatik yazıya dökme başarısız oldu: ${txError.message} Transkript sekmesinden yeniden deneyebilir ya da elle yazabilirsiniz.`, 'warning', 12000);
       else if (p.transcribe && !segments.length) toast('Seans kaydedildi, ancak kayıtta yazıya dökülecek konuşma bulunamadı. Transkript sekmesinden elle ekleyebilirsiniz.', 'warning', 9000);
       else toast('Seans kaydedildi. Transkripti gözden geçirip "Doğrulandı" olarak işaretleyin.', 'success', 6000);
@@ -660,6 +762,7 @@ export async function render(root, { query }, app) {
           h('div.card', null, h('div.card-body', null, dz, input, fileCard)),
           h('div.card', null, h('div.card-head', null, h('h2', null, icon('fileText', 18), 'Transkript')), h('div.card-body', null, txOpts, extraBox))),
         h('div.stack', null,
+          stimulusCard(task),
           h('div.card', null, h('div.card-head', null, h('h3', null, icon('calendar', 17), 'Kayıt bilgisi')),
             h('div.card-body', null, field('Kayıt tarihi ve saati', when, 'Varsayılan: dosyanın değiştirilme zamanı.'),
               h('div.prompt-card.mt-2', null, h('div.p-label', null, 'Görev'), h('div.p-text', { style: { fontSize: '14px' } }, task.label), state.taskDetail ? h('div.small.muted', null, state.taskDetail) : null))),
@@ -708,6 +811,7 @@ export async function render(root, { query }, app) {
           h('div.row.between', { style: { marginBottom: '8px' } }, transcriptToolbar(ta), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: () => fileIn.click() } }, icon('upload', 15), '.txt / .cha yükle'), fileIn),
           ta, preview)),
         h('div.stack', null,
+          stimulusCard(task),
           h('div.card', null, h('div.card-body', null, field('Seans tarihi ve saati', when))),
           h('div.card', null, h('div.card-head', null, h('h3', null, icon('book', 17), 'Transkripsiyon kuralları')), h('div.card-body', null, transcriptHelp())),
           h('div.row', { style: { justifyContent: 'flex-end' } }, h('button.btn.btn-ghost', { on: { click: () => showSetup() } }, icon('arrowLeft', 16), 'Geri'), go))));

@@ -112,5 +112,57 @@ export async function runAll() {
     const ok = t && t.a.pos === POS[pos];
     results.push({ kind: 'context', input: `${s} (#${idx + 1})`, expected: `${POS[pos]} — ${note}`, got: t ? `${chainOf(t.a)} [${t.a.pos}]${t.a.context ? ' · ' + t.a.context.rule : ''}` : '—', ok });
   }
+  await studyTests(results);
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Öngörü çalışması: konuşmacı ayrımı, protokol ölçütleri, model ve istatistikler
+// ---------------------------------------------------------------------------
+async function studyTests(results) {
+  const { textCue, labelSpeakers } = await import('../js/core/text/speakers.js');
+  const { computeProtocolMeasures } = await import('../js/core/metrics/discourse.js');
+  const { scoreSample, monthlyProjection, fitTeamModel } = await import('../js/core/metrics/prognosis.js');
+  const { predictionMetrics, weightedKappa, fleissKappa } = await import('../js/core/metrics/studyStats.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'öngörü', input, expected, got: String(got), ok: !!ok });
+
+  const cues = [
+    ['Bu resmi anlatır mısınız?', 'examiner'], ['Burda neler görüyorsunuz?', 'examiner'], ['Başka ne var?', 'examiner'],
+    ['Tamam.', 'examiner'], ['Hıhı', 'examiner'], ['Bilmiyorum.', 'participant'], ['Anlatacağımız bitti mi?', null],
+    ['Bunlar kuş mu?', null], ['Araba otobüse çarpmış.', null],
+  ];
+  for (const [t, exp] of cues) { const c = textCue(t); add(`ipucu: ${t}`, exp || 'ipucu yok', c.speaker || 'ipucu yok', c.speaker === exp); }
+
+  // Ses perdesi: iki ses, metin ipucu terapist kümesini belirler
+  const track = { t: [], hz: [] };
+  for (let t = 0; t < 40; t += 0.1) { track.t.push(Number(t.toFixed(1))); track.hz.push(t % 10 < 5 ? 210 : 120); }
+  const segs = [0, 10, 20, 30].flatMap((b) => [{ text: 'Neler görüyorsunuz?', start: b + 0.5, end: b + 4.5 }, { text: 'bir araba var', start: b + 5.5, end: b + 9.5 }]);
+  segs[2].text = 'hmm bakayım'; // ipucusuz terapist bölümü → ses perdesinden
+  const lab = labelSpeakers(segs, { f0Track: track });
+  add('ses perdesiyle ayrım', 'terapist bölüm 3 ses perdesinden', `${lab.segments[2].speaker}/${lab.segments[2].speakerSource}`, lab.segments[2].speaker === 'examiner' && lab.segments[2].speakerSource === 'pitch');
+  const btn = labelSpeakers([{ text: 'araba var', start: 1, end: 3 }], { therapistIntervals: [[0.8, 3.2]] });
+  add('terapist tuşu', 'examiner/button', `${btn.segments[0].speaker}/${btn.segments[0].speakerSource}`, btn.segments[0].speakerSource === 'button');
+
+  // Protokol ölçütleri: terapist satırı ölçüte girmez, bilgi birimleri eşleşir
+  const tx = 'T: Bu resimde neler oluyor, anlatır mısınız?\nBir kaza olmuş, mavi araba otobüse çarpmış.\nYerde yaralı bir adam yatıyor, ambulans gelmiş.\nPolis kalabalığı durduruyor.';
+  const r = analyzeSession({ transcript: tx, final: true });
+  const m = computeProtocolMeasures(r, {});
+  add('terapist sözcükleri dışarıda', 'danışan 17 sözcük', m.features.totalWords, m.features.totalWords === 17);
+  const need = ['otobus', 'araba', 'ambulans', 'polis', 'e_kaza', 'e_yatma', 'e_ambulans', 'e_polis'];
+  add('bilgi birimleri', need.join(','), m.detail.iuFound.join(','), need.every((x) => m.detail.iuFound.includes(x)));
+
+  // Model: daha bozuk örnek daha yüksek risk; aylık birikim artan
+  const lo = scoreSample({ totalWords: 200, wpm: 110, iuCoverage: 0.7, eventCoverage: 0.7, fillerRate: 2, vagueRate: 1, pronounRatio: 0.07, mluW: 6.5 }, { age: 68, education: 11 });
+  const hi = scoreSample({ totalWords: 60, wpm: 55, iuCoverage: 0.2, eventCoverage: 0.1, fillerRate: 12, vagueRate: 9, pronounRatio: 0.16, mluW: 3 }, { age: 68, education: 11 });
+  add('risk sıralaması', 'bozuk > %50 > %30 > sağlıklı', `${Math.round(hi.risk * 100)} > ${Math.round(lo.risk * 100)}`, hi.risk > lo.risk && lo.risk < 0.3 && hi.risk > 0.5);
+  const mp = monthlyProjection(0.5);
+  add('aylık birikimli risk', '12. ay = %50, artan', `${Math.round(mp[11].p * 100)}`, Math.abs(mp[11].p - 0.5) < 1e-9 && mp.every((x, i) => i === 0 || x.p > mp[i - 1].p));
+  add('ekip modeli eşiği', '12 vakadan azsa kullanılmaz', fitTeamModel([{ composite: 1, developed: true }]).used, fitTeamModel([{ composite: 1, developed: true }]).used === false);
+
+  // İstatistikler
+  const pm = predictionMetrics([{ p: 0.9, y: true }, { p: 0.2, y: false }, { p: 0.6, y: false }, { p: 0.4, y: true }]);
+  add('doğruluk / AUC', 'doğruluk 0,5 · AUC 0,75', `${pm.accuracy} · ${pm.auc}`, pm.accuracy === 0.5 && pm.auc === 0.75);
+  add('ağırlıklı kappa (tam uyum)', '1', weightedKappa([[0, 0], [1, 1], [2, 2], [3, 3]]), weightedKappa([[0, 0], [1, 1], [2, 2], [3, 3]]) === 1);
+  const fk = fleissKappa([[0, 0], [3, 3], [1, 1], [2, 2]]);
+  add('Fleiss kappa (tam uyum)', '1', fk?.kappa, fk && Math.abs(fk.kappa - 1) < 1e-9);
 }

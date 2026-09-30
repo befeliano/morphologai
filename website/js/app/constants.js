@@ -6,7 +6,11 @@ export const READING_PASSAGE = 'Kuzey Rüzgârı ile Güneş, hangisinin daha g�
   + 'Sonunda Kuzey Rüzgârı vazgeçti. Ardından Güneş ılık ılık parlamaya başladı ve yolcu çok geçmeden paltosunu çıkardı. '
   + 'Böylece Kuzey Rüzgârı, Güneş\'in daha güçlü olduğunu kabul etmek zorunda kaldı.';
 
+/** Öngörü çalışmasının standart yönergesi (protokol: kaza resmi, 3–5 dk spontan anlatım). */
+export const ACCIDENT_INSTRUCTION = 'Bu resimde gördüklerinizi mümkün olduğunca ayrıntılı ve sıralı bir şekilde anlatır mısınız? Resimde neler oluyor, kimler var, ne yapıyorlar?';
+
 export const TASK_TYPES = [
+  { id: 'accident', label: 'Kaza resmi anlatımı (öngörü protokolü)', prompt: ACCIDENT_INSTRUCTION, hint: 'Standart uyaran; 3–5 dakika spontan anlatım. Aynı görsel başlangıçta ve 1 yıl sonraki izlemde kullanılır.', stimulus: 'assets/stimuli/kaza-resmi.jpg' },
   { id: 'picture', label: 'Resim betimleme', prompt: 'Bu resme bakın ve resimde olan her şeyi bana anlatın.', hint: 'ör. Kurabiye Hırsızı (BDAE), ADD resmi' },
   { id: 'sequence', label: 'Resimli öykü (resim dizisi)', prompt: 'Bu resimlerdeki olayları sırasıyla bir öykü gibi anlatın.', hint: 'ör. 4–6 kartlık öykü dizisi' },
   { id: 'story', label: 'Öykü yeniden anlatımı', prompt: 'Kül Kedisi masalını hatırladığınız kadarıyla baştan sona anlatır mısınız?', hint: 'ör. Kül Kedisi, Keloğlan' },
@@ -54,9 +58,16 @@ export const MODULES = [
     tasks: ['smr_pataka', 'amr_pa', 'amr_ta', 'amr_ka', 'reading', 'other'],
     defaultTask: 'smr_pataka', transcript: false,
   },
+  {
+    id: 'cognitive', label: 'Bilişsel-dil (öngörü)', long: 'Bilişsel-dilsel izlem — kaza resmi anlatımı', icon: 'target', tone: 'lavender',
+    description: 'Kaza resmi anlatımıyla konuşma örneği; DKT ve program 1 yıllık gerileme riskini ayrı ayrı tahmin eder, izlemde doğruluk ölçülür.',
+    tasks: ['accident', 'picture', 'story', 'personal', 'free', 'other'],
+    defaultTask: 'accident', transcript: true, study: true,
+  },
 ];
 
-export const moduleOf = (id) => MODULES.find((m) => m.id === id) || MODULES[0];
+// Modülü olmayan (eski) seanslar afazi sayılır
+export const moduleOf = (id) => MODULES.find((m) => m.id === id) || MODULES.find((m) => m.id === 'aphasia');
 
 export const DIAGNOSES = [
   { id: 'broca', label: 'Broca afazisi', group: 'Afazi' },
@@ -78,6 +89,10 @@ export const DIAGNOSES = [
   { id: 'spazmodik', label: 'Spazmodik disfoni', group: 'Ses' },
   { id: 'dizartri', label: 'Dizartri', group: 'Motor konuşma' },
   { id: 'apraksi', label: 'Konuşma apraksisi', group: 'Motor konuşma' },
+  { id: 'oznel-bilissel', label: 'Öznel bilişsel yakınma', group: 'Bilişsel' },
+  { id: 'hbb', label: 'Hafif bilişsel bozukluk (HBB/MCI)', group: 'Bilişsel' },
+  { id: 'alzheimer', label: 'Alzheimer tipi demans', group: 'Bilişsel' },
+  { id: 'demans-diger', label: 'Demans (diğer / sınıflanmamış)', group: 'Bilişsel' },
   { id: 'kontrol', label: 'Sağlıklı kontrol', group: 'Diğer' },
   { id: 'diger', label: 'Diğer', group: 'Diğer' },
 ];

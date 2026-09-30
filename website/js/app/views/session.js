@@ -9,6 +9,7 @@ import { createLab, voiceReportCard, ddkCard } from '../components/lab.js';
 import { chips, posTag, openCorrection, ambiguityBadge, POS_OPTIONS } from '../components/morphView.js';
 import { screeningCard, languageMetricGrid, exclusionSummary, stutteringCard, speechProfileCard } from '../components/summaryViews.js';
 import { computeFluency } from '../../core/metrics/fluency.js';
+import { computeProtocolMeasures } from '../../core/metrics/discourse.js';
 import { transcriptToolbar, transcriptHelp } from '../components/transcriptTools.js';
 import { barChart, chartImage } from '../ui/charts.js';
 import { sessionsCsv, wordsCsv } from '../../export/csv.js';
@@ -70,9 +71,17 @@ export async function render(root, { params, query }, app) {
   const save = async (extra = {}) => {
     if (!canWrite) return;
     const analysis = current ? summarize(current) : null;
+    // Öngörü örneklemi: diğer DKT'lerin değerlendirmeleri ezilmesin diye study alanı taze okunur
+    let studyPatch = {};
+    if (session.study?.protocol) {
+      const fresh = (await app.repo.sessions.get(session.id))?.study || session.study;
+      const m = current ? computeProtocolMeasures(current, { segments: session.transcript?.segments || [], acoustic: session.acoustic }) : null;
+      studyPatch = { study: m ? { ...fresh, features: m.features, detail: m.detail, featuresAt: new Date().toISOString() } : fresh };
+    }
     session = await app.repo.sessions.save({
       ...session,
       ...extra,
+      ...studyPatch,
       transcript: { ...(session.transcript || {}), text, editedAt: new Date().toISOString(), editedBy: app.ctx.user.id },
       corrections,
       analysis,
@@ -103,7 +112,8 @@ export async function render(root, { params, query }, app) {
     const saved = fresh && (await openSessionEditor(app, fresh));
     if (saved) { dirty = false; app.setGuard(null); app.navigate(`/seans/${session.id}?tab=${tab}`, { replace: true }); }
   });
-  app.setActions([editBtn, statusBtn, pdfBtn, saveBtn]);
+  const studyLink = session.study?.protocol ? h('a.btn.btn-soft.btn-sm', { href: `#/ongoru/${session.id}` }, icon('target', 15), 'Öngörü') : null;
+  app.setActions([studyLink, editBtn, statusBtn, pdfBtn, saveBtn]);
 
   const head = h('div');
   const drawHeader = () => {
@@ -292,9 +302,27 @@ export async function render(root, { params, query }, app) {
           else if (t.kind === 'fragment') body.appendChild(h('span.f', null, `${t.text}-`));
           body.appendChild(document.createTextNode(' '));
         }
+        // Tek tıkla konuşmacı değiştir: satırın başına "T:" ekler ya da kaldırır
+        const spkBtn = canWrite ? h('button.btn.btn-text.btn-sm', {
+          type: 'button', title: u.speaker === 'examiner' ? 'Danışan sözcesi yap' : 'Terapist sözcesi yap', style: { padding: '2px 6px', fontSize: '11px' },
+          on: {
+            click: (e) => {
+              e.stopPropagation();
+              const ls = ta.value.split('\n');
+              const line = ls[u.lineNo] ?? '';
+              const m = line.match(/^(\s*\[\d{1,2}:\d{2}(?:[.,]\d)?\]\s*)?(.*)$/);
+              const stamp = m[1] || '';
+              const rest = m[2];
+              const spk = /^\*?(T|TER|DKT|INV|EXA|INT|K|TERAPİST|TERAPIST)\s*:\s*/i;
+              ls[u.lineNo] = spk.test(rest) ? stamp + rest.replace(spk, '') : `${stamp}T: ${rest.replace(/^\*?(PAR|PAT|HST|HAS|H|P|D|DANIŞAN|HASTA)\s*:\s*/i, '')}`;
+              ta.value = ls.join('\n');
+              ta.dispatchEvent(new Event('input'));
+            },
+          },
+        }, u.speaker === 'examiner' ? '→ D' : '→ T') : null;
         const row = h(`div.utt-row${u.included ? '' : '.ex'}`, { title: u.included ? '' : `MLU dışı: ${u.excludeReason}` },
           h('div.n', null, i + 1), body,
-          h('div.counts', null, u.speaker === 'examiner' ? 'terapist' : u.included ? `${u.wordsIncluded} s · ${u.morphemesIncluded} b` : 'dışı', u.start != null ? h('div', null, clock(u.start)) : null));
+          h('div.counts', null, u.speaker === 'examiner' ? 'terapist' : u.included ? `${u.wordsIncluded} s · ${u.morphemesIncluded} b` : 'dışı', u.start != null ? h('div', null, clock(u.start)) : null, spkBtn));
         row.addEventListener('click', () => {
           if (player && u.start != null) {
             const next = current.utterances.slice(i + 1).find((x) => x.start != null);
@@ -586,8 +614,9 @@ export async function render(root, { params, query }, app) {
       const { summary, heavy: hv } = splitAcoustic(acoustic);
       await app.repo.acoustic.put(session.id, hv);
       const lang = text.trim() ? recompute()?.language : null;
+      const freshStudy = session.study ? (await app.repo.sessions.get(session.id))?.study : undefined;
       session = await app.repo.sessions.save({
-        ...session, acoustic: summary, voice: measures.voice, ddk: measures.ddk, sz: measures.sz, mpt: measures.mptSec ?? session.mpt,
+        ...session, ...(freshStudy ? { study: freshStudy } : {}), acoustic: summary, voice: measures.voice, ddk: measures.ddk, sz: measures.sz, mpt: measures.mptSec ?? session.mpt,
         fluency: computeFluency(summary, lang, app.settings),
       });
       t();

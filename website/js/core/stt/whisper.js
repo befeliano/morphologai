@@ -159,20 +159,31 @@ export async function whisperCacheStatus(model) {
  * @param {Array<{start,end}>} segs  konuşma bölümleri (sn)
  * @param {number} duration
  */
-export function buildWindows(segs, duration, { maxLen = 24, pad = 0.3, splitGap = 1.5, minSpeech = 0.35 } = {}) {
+export function buildWindows(segs, duration, { maxLen = 24, pad = 0.3, splitGap = 1.5, minSpeech = 0.35, breaks = [] } = {}) {
   const out = [];
-  const push = (w) => { if (w && w.speech >= minSpeech) out.push({ start: Math.max(0, w.start - pad), end: Math.min(duration, w.end + pad) }); };
+  // breaks: konuşmacı değişim anları (ör. terapist tuşu) — pencere bu anlardan geçmez
+  const cuts = [...breaks].filter(Number.isFinite).sort((a, b) => a - b);
+  const crosses = (a, b) => cuts.some((x) => x > a + 0.05 && x < b - 0.05);
+  const push = (w) => {
+    if (!w || w.speech < minSpeech) return;
+    const a = cuts.filter((x) => x <= w.start).pop();
+    const b = cuts.find((x) => x >= w.end);
+    out.push({ start: Math.max(0, w.start - pad, a ?? -Infinity), end: Math.min(duration, w.end + pad, b ?? Infinity) });
+  };
   if (!segs || !segs.length) {
     for (let t = 0; t < duration; t += maxLen) out.push({ start: t, end: Math.min(duration, t + maxLen) });
     return out;
   }
   let cur = null;
   for (const s0 of segs) {
-    // Çok uzun kesintisiz konuşma: parçala
+    // Çok uzun kesintisiz konuşma ve konuşmacı değişim anları: parçala
+    const bounds = [s0.start, ...cuts.filter((x) => x > s0.start && x < s0.end), s0.end];
     const pieces = [];
-    for (let a = s0.start; a < s0.end; a += maxLen) pieces.push({ start: a, end: Math.min(s0.end, a + maxLen) });
+    for (let k = 0; k < bounds.length - 1; k++) {
+      for (let a = bounds[k]; a < bounds[k + 1]; a += maxLen) pieces.push({ start: a, end: Math.min(bounds[k + 1], a + maxLen) });
+    }
     for (const s of pieces) {
-      if (cur && (s.start - cur.end >= splitGap || s.end - cur.start > maxLen)) { push(cur); cur = null; }
+      if (cur && (s.start - cur.end >= splitGap || s.end - cur.start > maxLen || crosses(cur.end, s.end) || crosses(cur.start, s.start + 0.1))) { push(cur); cur = null; }
       if (!cur) cur = { start: s.start, end: s.end, speech: 0 };
       cur.end = s.end;
       cur.speech += s.end - s.start;
@@ -184,7 +195,7 @@ export function buildWindows(segs, duration, { maxLen = 24, pad = 0.3, splitGap 
 
 /**
  * @param {Float32Array} audio16k 16 kHz mono
- * @param {object} o { model, segments (konuşma bölümleri), onLoad(p,text), onStatus(status), onProgress(p,text) }
+ * @param {object} o { model, segments (konuşma bölümleri), breaks (konuşmacı değişim anları, sn), onLoad(p,text), onStatus(status), onProgress(p,text) }
  * @returns {Promise<Array<{text,start,end}>>}
  */
 export async function whisperTranscribe(audio16k, o = {}) {
@@ -195,7 +206,7 @@ export async function whisperTranscribe(audio16k, o = {}) {
     throw new Error('Bu model için WebGPU destekli bir tarayıcı gerekir (güncel Chrome). "Whisper Small" modelini seçin.');
   }
   const duration = audio16k.length / 16000;
-  const windows = buildWindows(o.segments, duration);
+  const windows = buildWindows(o.segments, duration, { breaks: o.breaks || [] });
   const out = [];
   let loops = 0;
   const t0 = performance.now();
@@ -205,7 +216,8 @@ export async function whisperTranscribe(audio16k, o = {}) {
     device = forcedDevice || device;
     const chunks = res.chunks && res.chunks.length ? res.chunks : [{ text: res.text, timestamp: [0, win.end - win.start] }];
     for (const c of chunks) {
-      const raw = (c.text || '').replace(/\s+/g, ' ').trim();
+      // Gülme ve anlamsız hece zincirleri ("kıhıhıhıhı…") sözcük sayılmaz: CHAT olay koduna çevrilir
+      const raw = (c.text || '').replace(/\s+/g, ' ').trim().replace(/\S*?([\p{L}]{1,3})\1{4,}\S*/gu, '&=güler');
       if (!raw || isHallucination(raw)) continue;
       const { text, looped } = collapseLoops(raw);
       if (looped) loops++;

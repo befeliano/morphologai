@@ -17,3 +17,17 @@ venv/
 .vercel/
 .DS_Store
 Thumbs.db
+
+# Ses/video kayıtları (danışan sağlık verisi) ASLA depoya girmez — depo herkese açık
+*.mp4
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.webm
+*.flac
+*.aac
+*.opus
+
+# Tez protokol infografiği (yayımlanmamış çalışma materyali) — depoya girmez
+/orneklem.jpeg

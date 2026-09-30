@@ -266,7 +266,7 @@ export function segmentsToTranscript(segments) {
     const r = Math.floor(s % 60);
     return `[${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}]`;
   };
-  return segments.map((s) => `${s.start != null ? fmt(s.start) + ' ' : ''}${capitalize(s.text)}`).join('\n');
+  return segments.map((s) => `${s.start != null ? fmt(s.start) + ' ' : ''}${s.speaker === 'examiner' ? 'T: ' : ''}${capitalize(s.text)}`).join('\n');
 }
 
 function capitalize(t) {
