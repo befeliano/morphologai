@@ -5,11 +5,14 @@
 import { h, mount, icon, num, badge, toast, modal, emptyState, fmtDate, download } from '../ui/dom.js';
 import { labelOf, DIAGNOSES, GROUPS } from '../constants.js';
 import { scatterChart } from '../ui/charts.js';
-import { CLINICAL_ITEMS, FEATURE_DEFS } from '../../core/metrics/prognosis.js';
+import { CLINICAL_ITEMS, FEATURE_DEFS, LANGUAGE_DOMAINS } from '../../core/metrics/prognosis.js';
 import { predictionMetrics, weightedKappa, fleissKappa, kappaLabel, pearson } from '../../core/metrics/studyStats.js';
 import { ageAt } from '../../core/metrics/cohort.js';
 import { csvSafeText } from '../../export/csv.js';
-import { loadStudyContext, computeStudy, aiSnapshot, updateStudy, ratingSummary, dueDate, isStudy, OUTCOMES, OUTCOME_CATEGORIES, PROTOCOL_ID } from '../study.js';
+import {
+  loadStudyContext, computeStudy, aiSnapshot, updateStudy, ratingSummary, dueDate, isStudy, outcomeDomainSet,
+  OUTCOMES, OUTCOME_CATEGORIES, PROTOCOL_ID,
+} from '../study.js';
 
 const pctTxt = (p) => (p == null ? '—' : `%${num(p * 100, 0)}`);
 
@@ -84,6 +87,24 @@ export async function render(root, _p, app) {
   const riskPts = rated.map((s) => ({ x: (ratingSummary(s.study).risk ?? 0) * 100, y: (s.study.ai.risk ?? 0) * 100 }));
   const rRisk = pearson(riskPts.map((p) => p.x), riskPts.map((p) => p.y));
 
+  // ---- Alan düzeyinde öngörü: hangi alanda? ----
+  // Program: p ≥ %50 → bozulma bekleniyor. DKT: ortalama düzey / 3 (≥ 2 "kuvvetle olası" → bekleniyor).
+  const domOut = withOutcome.map((s) => ({ s, set: outcomeDomainSet(s.study.outcome) })).filter((x) => x.set);
+  const domainRows = LANGUAGE_DOMAINS.map((d) => {
+    const prog = predictionMetrics(domOut.map(({ s, set }) => ({ p: s.study.ai?.locked ? (s.study.ai.domains?.[d.id]?.p ?? null) : null, y: set.has(d.id) })));
+    const dkt = predictionMetrics(domOut.map(({ s, set }) => {
+      const v = ratingSummary(s.study)?.domains?.[d.id];
+      return { p: v == null ? null : v / 3, y: set.has(d.id) };
+    }));
+    const pairs = rated.map((s) => [s.study.ai.domains?.[d.id]?.level, Math.round(ratingSummary(s.study).domains?.[d.id] ?? NaN)]).filter(([a, b]) => Number.isInteger(a) && Number.isInteger(b));
+    return { d, prog, dkt, kw: weightedKappa(pairs), nPairs: pairs.length, affected: domOut.filter((x) => x.set.has(d.id)).length };
+  });
+  const profCases = withOutcome.filter((s) => s.study.outcome.profile);
+  const profProg = profCases.filter((s) => s.study.ai?.locked && s.study.ai.profile);
+  const profProgHit = profProg.filter((s) => s.study.ai.profile === s.study.outcome.profile).length;
+  const profDkt = profCases.flatMap((s) => Object.values(s.study.ratings || {}).filter((r) => r.profile).map((r) => r.profile === s.study.outcome.profile));
+  const hasDomainData = rated.some((s) => s.study.ai.domains) || domOut.length;
+
   // ---- Vaka listesi ----
   const now = Date.now();
   const dueCount = baselines.filter((s) => !s.study.outcome && !s.study.followUpId && dueDate(s).getTime() <= now).length;
@@ -136,6 +157,17 @@ export async function render(root, _p, app) {
             h('td.num', null, r.fl ? h('span', null, num(r.fl.kappa, 2), h('div.tiny.muted', null, `${r.fl.raters} DKT, ${r.fl.subjects} örneklem`)) : '—')))))),
           h('div.row', { style: { padding: '12px 16px', gap: '8px' } }, badge(`Yalnız DKT saptadı: ${venn.dktOnly}`, 'outline'), badge(`Ortak bulgu: ${venn.both}`, 'ok'), badge(`Yalnız program saptadı: ${venn.aiOnly}`, 'outline')),
           h('p.tiny.muted', { style: { padding: '0 16px 12px' } }, 'κw: kuadratik ağırlıklı Cohen kappa (0–3 puanlar). Bulgu = puan ≥ 2.')))),
+    hasDomainData ? h('div.card.mt-3', null, h('div.card-head', null, h('h2', null, icon('layers', 18), 'Hangi alanda? Alan bazlı öngörü'), h('span.sub', null, `${domOut.length} örneklemde alan sonucu belli`)),
+      h('div.card-body.tight', null, h('div.table-wrap', null, h('table.table', null,
+        h('thead', null, h('tr', null, h('th', null, 'Dil alanı'), h('th.num', null, 'Bozulan'), h('th.num', null, 'Program doğruluk'), h('th.num', null, 'Program duyarlılık'), h('th.num', null, 'DKT doğruluk'), h('th.num', null, 'DKT duyarlılık'), h('th.num', null, 'κw (program–DKT)'))),
+        h('tbody', null, domainRows.map((r) => h('tr', null, h('td.small', null, r.d.long),
+          h('td.num', null, domOut.length ? `${r.affected}/${domOut.length}` : '—'),
+          h('td.num', null, r.prog.n ? pctTxt(r.prog.accuracy) : '—'), h('td.num', null, r.prog.sensitivity != null ? pctTxt(r.prog.sensitivity) : '—'),
+          h('td.num', null, r.dkt.n ? pctTxt(r.dkt.accuracy) : '—'), h('td.num', null, r.dkt.sensitivity != null ? pctTxt(r.dkt.sensitivity) : '—'),
+          h('td.num', null, r.kw != null ? h('span', null, num(r.kw, 2), h('div.tiny.muted', null, `${kappaLabel(r.kw)} · n = ${r.nPairs}`)) : r.nPairs ? h('span.tiny.muted', null, `n = ${r.nPairs}`) : '—')))))),
+        h('p.small', { style: { padding: '10px 16px 0', margin: 0 } }, h('b', null, 'Tür (örüntü) isabeti: '),
+          profCases.length ? `program ${profProg.length ? `${profProgHit}/${profProg.length}` : '—'} · DKT ${profDkt.length ? `${profDkt.filter(Boolean).length}/${profDkt.length}` : '—'}` : 'gerçekleşen tür girilen izlem sonucu henüz yok.'),
+        h('p.tiny.muted', { style: { padding: '8px 16px 12px' } }, 'Program alan olasılığı ≥ %50 ise, DKT "kuvvetle olası" ya da "kesin" dediyse o alanda bozulma bekleniyor sayılır. κw, sonuç beklenmeden de hesaplanır: program ile DKT\'nin alan düzeyleri (0–3) ne kadar örtüşüyor. "Gerileme gelişmedi" sonucunda hiçbir alan bozulmamış kabul edilir.'))) : null,
     riskPts.length >= 2 ? h('div.card.mt-3', null, h('div.card-head', null, h('h3', null, icon('activity', 17), 'Risk tahminleri: DKT ve program'), h('span.sub', null, rRisk != null ? `r = ${num(rRisk, 2)} · n = ${riskPts.length}` : '')),
       h('div.card-body', null, h('div.chart-box', { style: { height: '260px' } }, scatter), h('p.tiny.muted.mt-1', null, 'Her nokta bir örneklem: yatay eksen DKT tahmini, dikey eksen program tahmini (%).'))) : null,
     h('div.card.mt-3', null, h('div.card-head', null, h('h2', null, icon('folder', 18), 'Örneklemler')),
@@ -179,8 +211,10 @@ export async function render(root, _p, app) {
     const head = ['kod', 'grup', 'tani', 'yas', 'cinsiyet', 'egitim_yil', 'dalga', 'tarih', 'baslangic_kod_tarih',
       ...featKeys, ...extra,
       ...CLINICAL_ITEMS.map((i) => `program_${i.id}`), 'program_bilesik_z', 'program_risk', 'program_kilitli',
+      ...LANGUAGE_DOMAINS.map((d) => `program_alan_${d.id}_p`), 'program_tur',
       'dkt_sayisi', ...CLINICAL_ITEMS.map((i) => `dkt_ort_${i.id}`), 'dkt_ort_risk', 'dkt_kor_degil_sayisi',
-      'sonuc', 'sonuc_kategori', 'sonuc_yontem', 'sonuc_tarih'];
+      ...LANGUAGE_DOMAINS.map((d) => `dkt_ort_alan_${d.id}`), 'dkt_tur',
+      'sonuc', 'sonuc_kategori', 'sonuc_yontem', 'sonuc_tarih', ...LANGUAGE_DOMAINS.map((d) => `sonuc_alan_${d.id}`), 'sonuc_tur'];
     const esc = (v) => { if (v == null) return ''; const s = typeof v === 'number' ? String(Number(v.toFixed(4))) : csvSafeText(String(v)); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = sctx.study.map((s) => {
       const p = byId.get(s.patientId);
@@ -191,8 +225,11 @@ export async function render(root, _p, app) {
       return [p?.code, labelOf(GROUPS, p?.group || 'patient'), labelOf(DIAGNOSES, p?.diagnosis), ageAt(p, s), p?.sex, p?.education, s.study.wave, s.recordedAt?.slice(0, 10), base ? base.recordedAt?.slice(0, 10) : '',
         ...featKeys.map((k) => f[k]), ...extra.map((k) => f[k]),
         ...CLINICAL_ITEMS.map((i) => s.study.ai?.items?.[i.id]?.score), s.study.ai?.composite, s.study.ai?.risk, s.study.ai?.locked ? 1 : 0,
+        ...LANGUAGE_DOMAINS.map((d) => s.study.ai?.domains?.[d.id]?.p), s.study.ai?.profile,
         rs?.n || 0, ...CLINICAL_ITEMS.map((i) => rs?.items?.[i.id]), rs?.risk, Object.values(s.study.ratings || {}).filter((r) => r.unblinded).length,
-        o.status, o.category, o.method, o.date].map(esc).join(',');
+        ...LANGUAGE_DOMAINS.map((d) => rs?.domains?.[d.id]), [...new Set(Object.values(s.study.ratings || {}).map((r) => r.profile).filter(Boolean))].join('|'),
+        o.status, o.category, o.method, o.date,
+        ...LANGUAGE_DOMAINS.map((d) => { const set = outcomeDomainSet(o.status ? o : null); return set ? (set.has(d.id) ? 1 : 0) : null; }), o.profile].map(esc).join(',');
     });
     const text = `﻿# MorphologAI öngörü çalışması (kaza resmi protokolü) · ${new Date().toISOString().slice(0, 10)} · danışan adı içermez\n${head.join(',')}\n${rows.join('\n')}`;
     download(new Blob([text], { type: 'text/csv;charset=utf-8' }), `MorphologAI_ongoru_calismasi_${new Date().toISOString().slice(0, 10)}.csv`);

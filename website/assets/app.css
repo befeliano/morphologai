@@ -666,6 +666,26 @@ table.table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .iu { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .iu.hit { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-50); color: var(--text); }
 @media (max-width: 560px) { .risk-hero { grid-template-columns: minmax(0, 1fr); } .risk-num { font-size: 36px; } }
+/* Alan bazlı öngörü: gözlem → ara çıkarım → sonuç */
+.domain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.domain-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--surface); min-width: 0; }
+.domain-card.lv-2 { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.domain-card.lv-3 { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.domain-card h4 { margin: 0; font-size: 15px; min-width: 0; }
+.domain-card .dp { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pbar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 8px 0 10px; }
+.pbar > span { display: block; height: 100%; border-radius: 999px; background: var(--muted); }
+.lv-1 .pbar > span { background: var(--info, var(--primary)); }
+.lv-2 .pbar > span { background: var(--warn); }
+.lv-3 .pbar > span { background: var(--danger); }
+.chain { margin: 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.55; }
+.chain > li { position: relative; padding: 0 0 8px 16px; }
+.chain > li::before { content: ''; position: absolute; left: 3px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--border-2); }
+.chain .step { display: block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.chain q { color: var(--text-2); font-style: italic; }
+.chain q::before, .chain q::after { content: '"'; }
+.score-pick.words button { min-width: 0; padding: 6px 10px; font-size: 12.5px; }
+.domain-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 16px; }
 
 /* ---------- Analiz ---------- */
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px 14px; }

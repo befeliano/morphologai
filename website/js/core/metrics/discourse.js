@@ -49,6 +49,9 @@ const SCENE_WORDS = new Set([
   sağ sol karşı ara içeri dışarı motor kaput plaka far ön cam şişe yağ benzin fren hız kalabalık yardım`.split(/\s+/).filter(Boolean),
 ]);
 
+/** Bağlama uygun olmayan (kaba / ünlem) ifadeler — pragmatik kanıt. */
+const INAPPROPRIATE = new Set(['lan', 'ulan', 'be', 'hay', 'kahretsin', 'lanet', 'defol', 'salak', 'aptal', 'gerizekalı']);
+
 const CONNECTIVES = new Set(['ve', 'sonra', 'ardından', 'ama', 'fakat', 'ancak', 'çünkü', 'yüzden', 'ayrıca', 'hem', 'veya', 'yoksa', 'böylece', 'dolayısıyla', 'lakin', 'oysa', 'derken', 'önce']);
 const DEICTIC_PLACE = new Set(['burada', 'burda', 'orada', 'orda', 'şurada', 'şurda', 'buraya', 'oraya', 'şuraya', 'burası', 'orası', 'şurası']);
 
@@ -85,6 +88,10 @@ export function mtld(tokens, threshold = 0.72) {
  * @param {object} o        { segments: konuşmacı etiketli bölümler [{start,end,speaker}], acoustic: akustik özet }
  * @returns {{features: object, detail: object}}
  */
+// language.js'teki yüklemli sözce ölçütüyle aynı tanım (çekimli eylem, ek-fiil, var/yok/değil)
+const hasPredicate = (t) => t.kind === 'word' && !t.excluded && t.a
+  && ((t.a.verb && t.a.verb.finite) || t.a.pos === 'cop' || (t.a.morphemes || []).some((m) => m.cat === 'ek-fiil') || ['var', 'yok', 'değil'].includes(t.a.root));
+
 export function computeProtocolMeasures(result, { segments = [], acoustic = null } = {}) {
   const L = result.language;
   const F = result.fluency;
@@ -186,6 +193,8 @@ export function computeProtocolMeasures(result, { segments = [], acoustic = null
   const connectives = toks.filter((x) => CONNECTIVES.has(x.norm)).length;
 
   // ---- L8 konu uygunluğu ----
+  const inappropriate = toks.filter((x) => INAPPROPRIATE.has(x.norm));
+  const byCode = L.errors?.byCode || {};
   const nouns = toks.filter((x) => x.pos === 'noun' && !DEICTIC_PLACE.has(x.norm));
   const offTopic = nouns.filter((x) => !SCENE_WORDS.has(x.root) && !SCENE_WORDS.has(x.norm) && ![...SCENE_WORDS].some((k) => k.length >= 5 && x.norm.startsWith(k)));
 
@@ -226,8 +235,20 @@ export function computeProtocolMeasures(result, { segments = [], acoustic = null
     converbsPerUtt: includedUtts ? r(converbs / includedUtts, 2) : null,
     // L8
     offTopicRatio: nouns.length ? r(offTopic.length / nouns.length, 3) : null,
+    // Alan bazlı çıkarım için ek kanıtlar
+    promptRatio: r(exam.length / Math.max(1, part.length), 2),                        // danışan sözcesi başına terapist yönlendirmesi
+    questionRate: part.length ? r(part.filter((u) => u.question).length / part.length, 3) : null, // görevi soruyla geri yöneltme
+    inappropriateRate: r(per100(inappropriate.length), 2),
+    unknownRate: L.errors?.unknownRate ?? null,                                     // sözlük dışı / biçimi bozuk sözcük
+    phonRate: r(per100((L.errors?.phonologicalCandidates?.length || 0) + (byCode.p || 0) + (byCode.f || 0) + (byCode.n || 0)), 2),
+    semanticErrorRate: r(per100(byCode.s || 0), 2),
+    morphErrorRate: r(per100((byCode.m || 0) + (byCode.g || 0)), 2),
+    predicateRatio: L.verbs?.utterancesWithPredicate ?? null,                       // yüklemli sözce oranı
+    fragmentRate: L.disfluency?.fragmentRate ?? null,
     // Örnek bilgisi
     participantUtterances: part.length,
+    nounCount: nouns.length,     // küçük örneklem düzeltmesi için paydalar
+    verbCount: verbsTotal,
     examinerUtterances: exam.length,
     examinerWords: exam.reduce((s, u) => s + u.tokens.filter((t) => t.kind === 'word').length, 0),
   };
@@ -240,7 +261,13 @@ export function computeProtocolMeasures(result, { segments = [], acoustic = null
       entitiesFound: entities.filter((e) => foundSet.has(e.id)).length,
       eventsFound: events.filter((e) => foundSet.has(e.id)).length,
       offTopicWords: [...new Set(offTopic.map((x) => x.t.text))].slice(0, 20),
-      vagueWords: [...new Set(toks.filter((x) => DEICTIC_PLACE.has(x.norm)).map((x) => x.t.text))].slice(0, 12),
+      vagueWords: [...new Set(toks.filter((x) => DEICTIC_PLACE.has(x.norm) || x.t.emptyFiller || x.norm === 'şey').map((x) => x.t.text))].slice(0, 12),
+      // Tümevarımsal gerekçe için somut örnekler (danışanın kendi sözleri)
+      participantQuestions: part.filter((u) => u.question).map((u) => u.raw?.trim() || '').filter(Boolean).slice(0, 6),
+      unknownWords: (L.errors?.unknownList || []).slice(0, 10),
+      phonCandidates: (L.errors?.phonologicalCandidates || []).slice(0, 8),
+      inappropriateWords: [...new Set(inappropriate.map((x) => x.t.text))].slice(0, 6),
+      noPredicateExamples: part.filter((u) => u.included && !u.tokens.some(hasPredicate)).map((u) => u.raw?.trim() || '').filter(Boolean).slice(0, 5),
     },
   };
 }

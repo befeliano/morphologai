@@ -4,9 +4,10 @@
  * session.study = {
  *   protocol: 'kaza-v1', wave: 'baseline' | 'followup', baselineId?, followUpId?,
  *   features, detail, featuresAt,                  // son hesaplanan protokol ölçütleri
- *   ai: { items:{id:{score,z}}, composite, risk, confidence, model, locked, lockedAt },  // kilitli program tahmini
- *   ratings: { [userId]: { name, items:{id:0..3}, risk:0..1, predicted:boolean, notes, unblinded, at } },
- *   outcome: { status:'developed'|'not_developed'|'unclear', category, method, date, notes, by, at },
+ *   ai: { items:{id:{score,z}}, composite, risk, confidence, model, locked, lockedAt,   // kilitli program tahmini
+ *         domains:{semantic:{p,z,level}, …}, profile },                               // alan bazlı öngörü ve örüntü türü
+ *   ratings: { [userId]: { name, items:{id:0..3}, risk:0..1, predicted:boolean, domains:{id:0..3}, profile, notes, unblinded, at } },
+ *   outcome: { status:'developed'|'not_developed'|'unclear', category, method, domains:[id], profile, date, notes, by, at },
  *   speakers: { examiner, participant, bySource, pitch }
  * }
  * Program tahmini, ilk DKT değerlendirmesi kaydedildiğinde kilitlenir: sonraki transkript düzeltmeleri
@@ -15,7 +16,7 @@
 import { analyzeSession } from '../core/analysis.js';
 import { computeFluency } from '../core/metrics/fluency.js';
 import { computeProtocolMeasures, ACCIDENT_IU, PROTOCOL_ID } from '../core/metrics/discourse.js';
-import { scoreSample, buildNorms, fitTeamModel, narrative, DEFAULT_MODEL } from '../core/metrics/prognosis.js';
+import { scoreSample, buildNorms, fitTeamModel, narrative, domainReasoning, profileReasoning, DEFAULT_MODEL } from '../core/metrics/prognosis.js';
 import { ageAt } from '../core/metrics/cohort.js';
 
 export { PROTOCOL_ID };
@@ -73,8 +74,41 @@ export function computeStudy(app, session, patient, sctx, { text } = {}) {
   const scored = scoreSample(measures.features, {
     norms: sctx.norms.norms, age: ageAt(patient, session), education: patient?.education, model: sctx.model, verified: session.status === 'verified',
   });
-  const text2 = narrative(measures.features, measures.detail, scored, { iuLabel });
-  return { result, measures, scored, text: text2 };
+  const ctx = { iuLabel, verified: session.status === 'verified' };
+  const text2 = narrative(measures.features, measures.detail, scored, ctx);
+  const reasoning = domainReasoning(scored, measures.features, measures.detail, ctx);
+  return { result, measures, scored, text: text2, reasoning, profileText: profileReasoning(scored) };
+}
+
+/** Alan düzeyinde "bozulma bekleniyor" kararı: program p ≥ %50, DKT "kuvvetle olası" ya da "kesin". */
+export const programDomainPositive = (d) => (d?.p == null ? null : d.p >= 0.5);
+export const raterDomainPositive = (level) => (Number.isInteger(level) ? level >= 2 : null);
+
+/**
+ * İzlem sonucunda bozulan alanlar: "gelişmedi" → hiçbiri; "gelişti" → işaretlenen alanlar
+ * (hiç işaretlenmediyse alan bilgisi yok sayılır); "belirsiz" → değerlendirilmez.
+ */
+export function outcomeDomainSet(outcome) {
+  if (!outcome || outcome.status === 'unclear') return null;
+  if (outcome.status === 'not_developed') return new Set();
+  return Array.isArray(outcome.domains) && outcome.domains.length ? new Set(outcome.domains) : null;
+}
+
+/** Program ve DKT alan tahminleri → {id: boolean|null}. */
+export const programDomainPreds = (ai) => Object.fromEntries(Object.entries(ai?.domains || {}).map(([k, d]) => [k, programDomainPositive(d)]));
+export const raterDomainPreds = (r) => Object.fromEntries(Object.entries(r?.domains || {}).map(([k, v]) => [k, raterDomainPositive(v)]));
+
+/** Alan isabeti: tahmin edilen her alanın sonuçla uyuşması. */
+export function domainAccuracy(preds, outSet) {
+  if (!outSet) return null;
+  let correct = 0;
+  let total = 0;
+  for (const [k, v] of Object.entries(preds || {})) {
+    if (v == null) continue;
+    total++;
+    if (v === outSet.has(k)) correct++;
+  }
+  return total ? { correct, total } : null;
 }
 
 /** Program tahmininin saklanacak özeti. */
@@ -85,6 +119,10 @@ export function aiSnapshot(scored) {
     risk: scored.risk == null ? null : Number(scored.risk.toFixed(4)),
     confidence: scored.confidence,
     model: scored.model,
+    domains: Object.fromEntries((scored.domains || []).map((d) => [d.id, {
+      p: d.p == null ? null : Number(d.p.toFixed(4)), z: d.z == null ? null : Number(d.z.toFixed(3)), level: d.level,
+    }])),
+    profile: scored.profile?.id || null,
     at: new Date().toISOString(),
   };
 }
@@ -106,11 +144,14 @@ export function ratingSummary(study) {
   const list = Object.values(study?.ratings || {});
   if (!list.length) return null;
   const items = {};
+  const domains = {};
   for (const r of list) for (const [k, v] of Object.entries(r.items || {})) if (Number.isInteger(v)) (items[k] = items[k] || []).push(v);
+  for (const r of list) for (const [k, v] of Object.entries(r.domains || {})) if (Number.isInteger(v)) (domains[k] = domains[k] || []).push(v);
   const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
   return {
     n: list.length,
     items: Object.fromEntries(Object.entries(items).map(([k, v]) => [k, mean(v)])),
+    domains: Object.fromEntries(Object.entries(domains).map(([k, v]) => [k, mean(v)])),
     risk: list.filter((r) => r.risk != null).length ? mean(list.filter((r) => r.risk != null).map((r) => r.risk)) : null,
   };
 }

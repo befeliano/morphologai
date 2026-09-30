@@ -403,6 +403,14 @@ export function setOverrides(map) {
 export function getOverrides() { return overrides; }
 export function clearCache() { cache.clear(); }
 
+/** Konuşma dilinde yerleşik ünlü düşmeli biçimler → standart yazım. */
+const SPOKEN_FORMS = {
+  burda: 'burada', orda: 'orada', şurda: 'şurada', nerde: 'nerede',
+  burdan: 'buradan', ordan: 'oradan', şurdan: 'şuradan', nerden: 'nereden',
+  burdaki: 'buradaki', ordaki: 'oradaki', şurdaki: 'şuradaki', nerdeki: 'neredeki',
+  bi: 'bir',
+};
+
 /**
  * Bir kelimeyi çözümler.
  * @param {string} token      kelime (noktalama temizlenmiş olmalı)
@@ -435,6 +443,10 @@ export function analyzeWord(token, opts = {}) {
       : closedAnalysis(original, base, 'prop', 'özel isim', { display: original.replace(/['’]$/, '') });
   } else if (/^[A-ZÇĞİÖŞÜ]{2,6}$/.test(token) && lex.abbr.has(token)) {
     result = closedAnalysis(original, word, 'abbr', 'kısaltma', { display: token, source: 'abbreviation' });
+  } else if (SPOKEN_FORMS[word]) {
+    // Konuşma dilindeki yerleşik kısalmalar (burda, orda, nerde…) hata ya da bilinmeyen sözcük değildir
+    const std = analyzeWord(SPOKEN_FORMS[word], { capitalized: false, initial });
+    result = { ...std, norm: word, spokenForm: SPOKEN_FORMS[word], known: true };
   } else {
     result = analyzeRegular(original, word, capitalized, initial);
   }

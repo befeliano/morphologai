@@ -165,4 +165,54 @@ async function studyTests(results) {
   add('ağırlıklı kappa (tam uyum)', '1', weightedKappa([[0, 0], [1, 1], [2, 2], [3, 3]]), weightedKappa([[0, 0], [1, 1], [2, 2], [3, 3]]) === 1);
   const fk = fleissKappa([[0, 0], [3, 3], [1, 1], [2, 2]]);
   add('Fleiss kappa (tam uyum)', '1', fk?.kappa, fk && Math.abs(fk.kappa - 1) < 1e-9);
+
+  // Alan bazlı öngörü ve örüntü türü
+  const { domainReasoning, profileReasoning } = await import('../js/core/metrics/prognosis.js');
+  const { outcomeDomainSet, domainAccuracy } = await import('../js/app/study.js');
+  const NORMAL = {
+    totalWords: 180, mluW: 6, wpm: 105, pauseRatio: 0.35, meanPause: 0.9, longPausesPerMin: 1, mattr: 0.72, mtld: 55, repetitionRate: 2,
+    fillerRate: 4, vagueRate: 3, wordFindingRate: 0.3, pronounRatio: 0.08, clauseDensity: 1.3, subordinateRatio: 0.25, morphemesPerWord: 1.95,
+    iuCoverage: 0.6, infoDensity: 9, eventCoverage: 0.55, connectivesPerUtt: 0.5, offTopicRatio: 0.12, promptRatio: 0.2, questionRate: 0.03,
+    inappropriateRate: 0, semanticErrorRate: 0.2, morphErrorRate: 0.3, predicateRatio: 0.85, unknownRate: 1, phonRate: 0.3, fragmentRate: 0.5,
+  };
+  const dom = (s, id) => s.domains.find((d) => d.id === id);
+  const typ = scoreSample(NORMAL, { age: 65, education: 8 });
+  add('tür: tipik örnek', 'typical, alanlar < %25', `${typ.profile.id} · en yüksek %${Math.round(Math.max(...typ.domains.map((d) => d.p)) * 100)}`, typ.profile.id === 'typical' && typ.domains.every((d) => d.level === 0));
+  const semPrag = scoreSample({ ...NORMAL, iuCoverage: 0.15, infoDensity: 3, offTopicRatio: 0.45, vagueRate: 8, promptRatio: 1, questionRate: 0.2, eventCoverage: 0.1 }, { age: 66, education: 5 });
+  add('tür: semantik-pragmatik', 'semantic_pragmatic; semantik & pragmatik ≥ %50, morfoloji < %25',
+    `${semPrag.profile.id} · sem %${Math.round(dom(semPrag, 'semantic').p * 100)} · prag %${Math.round(dom(semPrag, 'pragmatic').p * 100)} · morf %${Math.round(dom(semPrag, 'morphological').p * 100)}`,
+    semPrag.profile.id === 'semantic_pragmatic' && dom(semPrag, 'semantic').p >= 0.5 && dom(semPrag, 'pragmatic').p >= 0.5 && dom(semPrag, 'morphological').p < 0.25);
+  const agr = scoreSample({ ...NORMAL, morphemesPerWord: 1.4, subordinateRatio: 0.05, mluW: 2.5, clauseDensity: 0.6, predicateRatio: 0.5, wpm: 50, pauseRatio: 0.6 }, { age: 66, education: 8 });
+  add('tür: agramatik', 'agrammatic; semantik < %25', `${agr.profile.id} · sem %${Math.round(dom(agr, 'semantic').p * 100)}`, agr.profile.id === 'agrammatic' && dom(agr, 'semantic').p < 0.25);
+  const reas = domainReasoning(semPrag, { ...NORMAL, offTopicRatio: 0.45 }, { offTopicWords: ['kuş', 'deniz'], participantQuestions: ['Ne diyeyim?'] }, { verified: true });
+  const semR = reas.find((d) => d.id === 'semantic');
+  const pragR = reas.find((d) => d.id === 'pragmatic');
+  add('tümevarım: gözlem → çıkarım → sonuç', 'semantik gözleminde "kuş", pragmatikte soru örneği, sonuç %',
+    `${semR.observations.flatMap((o) => o.examples).join('/')} · ${pragR.observations.flatMap((o) => o.examples).join('/')}`,
+    semR.observations.some((o) => o.examples.includes('kuş')) && pragR.observations.some((o) => o.examples.includes('Ne diyeyim?')) && /%\d+/.test(semR.conclusion) && semR.inference.length > 20);
+  add('tür gerekçesi', 'etkilenen ve korunan alanlar sayılır', profileReasoning(semPrag).slice(0, 60), /semantik/.test(profileReasoning(semPrag)) && /korunan/.test(profileReasoning(semPrag)));
+  const unv = domainReasoning(semPrag, NORMAL, {}, { verified: false }).find((d) => d.id === 'phonological');
+  add('doğrulanmamış transkript uyarısı', 'fonolojik alanda uyarı', unv.caveat ? 'var' : 'yok', !!unv.caveat);
+
+  // Baskın alan çifti: dört alan belirgin olsa da semantik-pragmatik öndeyse tür semantik-pragmatiktir
+  const dom4 = scoreSample({ ...NORMAL, iuCoverage: 0, offTopicRatio: 0.5, promptRatio: 1.2, questionRate: 0.25, morphemesPerWord: 1.6, subordinateRatio: 0.08, mluW: 3, clauseDensity: 0.7, predicateRatio: 0.6 }, { age: 66, education: 8 });
+  add('tür: baskın semantik-pragmatik', 'semantic_pragmatic (biçim de etkilenmiş)', `${dom4.profile.id} · ${dom4.domains.map((d) => `${d.id} ${d.z.toFixed(1)}`).join(' ')}`, dom4.profile.id === 'semantic_pragmatic');
+
+  // Küçük örneklem düzeltmesi: 24 sözcükte tek bir uygunsuz sözcük, 240 sözcükteki on taneyle aynı ağırlıkta değildir
+  const few = scoreSample({ ...NORMAL, totalWords: 24, inappropriateRate: 4.17 }, {});
+  const many = scoreSample({ ...NORMAL, totalWords: 240, inappropriateRate: 4.17 }, {});
+  add('küçük örneklem düzeltmesi', 'z(24 sözcük) < z(240 sözcük)', `${few.z.inappropriateRate.toFixed(2)} < ${many.z.inappropriateRate.toFixed(2)}`, few.z.inappropriateRate < many.z.inappropriateRate && few.z.inappropriateRate < 4);
+  const burda = analyzeWord('Burda', { initial: true });
+  add('konuşma dili: burda', 'bilinen sözcük (bura+da)', `${burda.known} · ${burda.root}`, burda.known === true && /bura/.test(burda.root || ''));
+
+  // Protokol: terapist yönlendirmesi ve danışanın soruları
+  const tx2 = 'T: Anlatır mısınız?\nBurda bir şey var.\nNe diyeyim?\nT: Başka ne var?\nAraba otobüse çarpmış.';
+  const m2 = computeProtocolMeasures(analyzeSession({ transcript: tx2, final: true }), {});
+  add('yönlendirme ve soru oranı', 'promptRatio 0,67 · questionRate 0,333', `${m2.features.promptRatio} · ${m2.features.questionRate}`, m2.features.promptRatio === 0.67 && m2.features.questionRate === 0.333 && m2.detail.participantQuestions.some((q) => /diyeyim/.test(q)));
+
+  // Alan doğruluğu
+  const none = outcomeDomainSet({ status: 'not_developed' });
+  const devSet = outcomeDomainSet({ status: 'developed', domains: ['semantic', 'pragmatic'] });
+  const acc = domainAccuracy({ semantic: true, pragmatic: false, morphological: false, syntactic: null }, devSet);
+  add('alan isabeti', 'gelişmedi → boş küme; 2/3', `${none.size} · ${acc.correct}/${acc.total}`, none.size === 0 && acc.correct === 2 && acc.total === 3 && outcomeDomainSet({ status: 'developed' }) === null && outcomeDomainSet({ status: 'unclear' }) === null);
 }
