@@ -6,7 +6,7 @@
  *   features, detail, featuresAt,                  // son hesaplanan protokol ölçütleri
  *   ai: { items:{id:{score,z}}, composite, risk, confidence, model, locked, lockedAt,   // kilitli program tahmini
  *         domains:{semantic:{p,z,level}, …}, profile },                               // alan bazlı öngörü ve örüntü türü
- *   ratings: { [userId]: { name, items:{id:0..3}, risk:0..1, predicted:boolean, domains:{id:0..3}, profile, notes, unblinded, at } },
+ *   ratings: { [userId]: { name, items:{id:0..3}, risk:0..1, predicted:boolean, domains:{id:0..3}, profile, domainsUnblinded, notes, unblinded, at } },
  *   outcome: { status:'developed'|'not_developed'|'unclear', category, method, domains:[id], profile, date, notes, by, at },
  *   speakers: { examiner, participant, bySource, pitch }
  * }

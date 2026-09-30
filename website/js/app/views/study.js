@@ -213,7 +213,7 @@ export async function render(root, _p, app) {
       ...CLINICAL_ITEMS.map((i) => `program_${i.id}`), 'program_bilesik_z', 'program_risk', 'program_kilitli',
       ...LANGUAGE_DOMAINS.map((d) => `program_alan_${d.id}_p`), 'program_tur',
       'dkt_sayisi', ...CLINICAL_ITEMS.map((i) => `dkt_ort_${i.id}`), 'dkt_ort_risk', 'dkt_kor_degil_sayisi',
-      ...LANGUAGE_DOMAINS.map((d) => `dkt_ort_alan_${d.id}`), 'dkt_tur',
+      ...LANGUAGE_DOMAINS.map((d) => `dkt_ort_alan_${d.id}`), 'dkt_tur', 'dkt_alan_kor_degil_sayisi',
       'sonuc', 'sonuc_kategori', 'sonuc_yontem', 'sonuc_tarih', ...LANGUAGE_DOMAINS.map((d) => `sonuc_alan_${d.id}`), 'sonuc_tur'];
     const esc = (v) => { if (v == null) return ''; const s = typeof v === 'number' ? String(Number(v.toFixed(4))) : csvSafeText(String(v)); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = sctx.study.map((s) => {
@@ -227,7 +227,7 @@ export async function render(root, _p, app) {
         ...CLINICAL_ITEMS.map((i) => s.study.ai?.items?.[i.id]?.score), s.study.ai?.composite, s.study.ai?.risk, s.study.ai?.locked ? 1 : 0,
         ...LANGUAGE_DOMAINS.map((d) => s.study.ai?.domains?.[d.id]?.p), s.study.ai?.profile,
         rs?.n || 0, ...CLINICAL_ITEMS.map((i) => rs?.items?.[i.id]), rs?.risk, Object.values(s.study.ratings || {}).filter((r) => r.unblinded).length,
-        ...LANGUAGE_DOMAINS.map((d) => rs?.domains?.[d.id]), [...new Set(Object.values(s.study.ratings || {}).map((r) => r.profile).filter(Boolean))].join('|'),
+        ...LANGUAGE_DOMAINS.map((d) => rs?.domains?.[d.id]), [...new Set(Object.values(s.study.ratings || {}).map((r) => r.profile).filter(Boolean))].join('|'), Object.values(s.study.ratings || {}).filter((r) => r.domains && (r.unblinded || r.domainsUnblinded)).length,
         o.status, o.category, o.method, o.date,
         ...LANGUAGE_DOMAINS.map((d) => { const set = outcomeDomainSet(o.status ? o : null); return set ? (set.has(d.id) ? 1 : 0) : null; }), o.profile].map(esc).join(',');
     });

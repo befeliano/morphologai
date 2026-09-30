@@ -140,7 +140,9 @@ export async function render(root, { params, query }, app) {
               const v = r.domains[d.id];
               return badge(`${d.label}: ${DOMAIN_LEVELS[v].toLocaleLowerCase('tr-TR')}`, v >= 3 ? 'danger' : v === 2 ? 'warn' : v === 1 ? 'info' : 'outline');
             })),
-            r.profile ? h('div.small.mt-1', null, h('b', null, 'Beklenen tür: '), profileLabel(r.profile)) : null) : null,
+            r.profile ? h('div.small.mt-1', null, h('b', null, 'Beklenen tür: '), profileLabel(r.profile)) : null,
+            r.domainsUnblinded && !r.unblinded ? h('div.tiny.muted.mt-1', null, 'Alan öngörüleri program sonucu görüldükten sonra eklendi (kör değil).') : null) : null,
+          !r.domains ? h('p.small.mt-2', { style: { color: 'var(--warn)' } }, 'Alan öngörüsü (hangi alanda bozulma bekliyorsunuz?) eksik. "Düzenle" ile ekleyebilirsiniz; program sonucu açık olduğu için "kör değil" olarak işaretlenir.') : null,
           r.notes ? h('p.small.mt-2', null, h('b', null, 'Not: '), r.notes) : null)));
       return;
     }
@@ -180,6 +182,8 @@ export async function render(root, { params, query }, app) {
             name: `${app.ctx.user.title ? app.ctx.user.title + ' ' : ''}${app.ctx.user.name}`,
             items: { ...items }, risk: Number(risk.value) / 100, predicted: Number(risk.value) >= 50,
             domains: { ...doms }, profile: profileSel.value || null, notes: notes.value.trim(),
+            // Alan öngörüsü, program sonucu açıldıktan sonra eklendiyse kör değildir
+            domainsUnblinded: r ? (r.domains ? !!r.domainsUnblinded : true) : revealed,
             unblinded: r ? !!r.unblinded : revealed, at: new Date().toISOString(),
           };
           // İlk değerlendirmede program tahmini kilitlenir (önceden yapılmış tahmin olarak saklanır)
@@ -458,7 +462,7 @@ export async function render(root, { params, query }, app) {
             h('tr', null, h('td', null, h('b', null, 'Program (yapay zekâ)'), study.ai?.locked ? null : h('span.tiny.muted', null, ' · kilitsiz')), h('td.num', null, pctTxt(study.ai?.risk)), h('td', null, study.ai?.risk != null ? (study.ai.risk >= 0.5 ? 'gerileme' : 'gerileme yok') : '—'), h('td', null, verdict(study.ai?.risk)),
               h('td.num', null, domVerdict(programDomainPreds(study.ai))), h('td', null, profVerdict(study.ai?.profile))),
             ...raters.map((r) => h('tr', null, h('td', null, r.name, r.unblinded ? h('span.tiny.muted', null, ' · kör değil') : null), h('td.num', null, pctTxt(r.risk)), h('td', null, r.predicted ? 'gerileme' : 'gerileme yok'), h('td', null, verdict(r.risk)),
-              h('td.num', null, domVerdict(raterDomainPreds(r))), h('td', null, profVerdict(r.profile))))))) : null,
+              h('td.num', null, domVerdict(raterDomainPreds(r)), r.domainsUnblinded && !r.unblinded ? h('div.tiny.muted', null, 'kör değil') : null), h('td', null, profVerdict(r.profile))))))) : null,
         study.outcome && outSet ? h('p.tiny.muted.mt-1', null, `Alan isabeti: öngörülen 6 alandan kaçında "bozulma bekleniyor / beklenmiyor" kararı sonuçla uyuştu (bozulan alanlar: ${outSet.size ? LANGUAGE_DOMAINS.filter((d) => outSet.has(d.id)).map((d) => d.label.toLocaleLowerCase('tr-TR')).join(', ') : 'yok'}).`) : null)));
   } else if (baseline) {
     mount(followHost, h('div.card.mt-3', null,
