@@ -138,6 +138,45 @@ create table if not exists public.lexicon (
   constraint lexicon_org_word_key unique (org_id, word)
 );
 
+-- Materyal Atölyesi: sözcük bankası (ekibin eklediği/etiketlediği sözcükler), görseller, üretilen materyaller
+create table if not exists public.words (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references public.orgs (id) on delete cascade,
+  word       text not null check (char_length(word) between 1 and 60),
+  data       jsonb not null default '{}'::jsonb check (octet_length(data::text) <= 4096), -- category, ageBand, mediaId, hidden
+  created_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint words_org_word_key unique (org_id, word)
+);
+
+create table if not exists public.media_files (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references public.orgs (id) on delete cascade,
+  bucket     text not null default 'media',
+  path       text not null,
+  -- Yalnız raster görsel: SVG/HTML betik taşıyabilir
+  mime_type  text not null check (mime_type in ('image/png', 'image/jpeg', 'image/webp')),
+  size_bytes bigint not null default 0 check (size_bytes between 0 and 5242880),
+  meta       jsonb not null default '{}'::jsonb check (octet_length(meta::text) <= 4096), -- label, width, height
+  created_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists media_files_org_idx on public.media_files (org_id);
+
+create table if not exists public.materials (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references public.orgs (id) on delete cascade,
+  patient_id uuid,
+  kind       text not null check (char_length(kind) between 1 and 40),
+  title      text not null default '' check (char_length(title) <= 160),
+  data       jsonb not null check (octet_length(data::text) <= 262144), -- params, content
+  created_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists materials_org_idx on public.materials (org_id, created_at desc);
+
 create table if not exists public.audit (
   id      uuid primary key default gen_random_uuid(),
   org_id  uuid not null references public.orgs (id) on delete cascade,
@@ -195,7 +234,7 @@ begin
     new.created_at := old.created_at;
     new.created_by := old.created_by;
   end if;
-  if tg_table_name in ('patients', 'sessions', 'lexicon') then
+  if tg_table_name in ('patients', 'sessions', 'lexicon', 'words', 'materials') then
     new.updated_at := now();
   end if;
   if tg_table_name = 'sessions' and auth.uid() is not null then
@@ -240,6 +279,12 @@ drop trigger if exists stamp on public.lexicon;
 create trigger stamp before insert or update on public.lexicon for each row execute function public.tg_stamp();
 drop trigger if exists stamp on public.audio_files;
 create trigger stamp before insert or update on public.audio_files for each row execute function public.tg_stamp();
+drop trigger if exists stamp on public.words;
+create trigger stamp before insert or update on public.words for each row execute function public.tg_stamp();
+drop trigger if exists stamp on public.media_files;
+create trigger stamp before insert or update on public.media_files for each row execute function public.tg_stamp();
+drop trigger if exists stamp on public.materials;
+create trigger stamp before insert or update on public.materials for each row execute function public.tg_stamp();
 drop trigger if exists touch on public.acoustic;
 create trigger touch before insert or update on public.acoustic for each row execute function public.tg_touch();
 drop trigger if exists touch on public.orgs;
@@ -413,6 +458,7 @@ create or replace function public.org_storage_bytes(p_org uuid)
 returns bigint language sql stable security definer set search_path = public, pg_temp as $$
   select case when public.my_rank(p_org) >= 1
               then (select coalesce(sum(size_bytes), 0)::bigint from public.audio_files where org_id = p_org)
+                 + (select coalesce(sum(size_bytes), 0)::bigint from public.media_files where org_id = p_org)
               else 0::bigint end
 $$;
 
@@ -428,6 +474,9 @@ alter table public.acoustic    enable row level security;
 alter table public.audio_files enable row level security;
 alter table public.lexicon     enable row level security;
 alter table public.audit       enable row level security;
+alter table public.words       enable row level security;
+alter table public.media_files enable row level security;
+alter table public.materials   enable row level security;
 
 -- profiles: kendi profiliniz + ortak ekipteki kişiler; yalnızca kendi ad/unvanınızı değiştirebilirsiniz
 drop policy if exists profiles_select on public.profiles;
@@ -454,7 +503,7 @@ create policy members_select on public.members for select to authenticated
 do $$
 declare t text;
 begin
-  foreach t in array array['patients', 'sessions', 'acoustic', 'audio_files', 'lexicon'] loop
+  foreach t in array array['patients', 'sessions', 'acoustic', 'audio_files', 'lexicon', 'words', 'media_files', 'materials'] loop
     execute format('drop policy if exists %I on public.%I', t || '_select', t);
     execute format('create policy %I on public.%I for select to authenticated using (org_id in (select public.my_orgs(1)))', t || '_select', t);
     execute format('drop policy if exists %I on public.%I', t || '_insert', t);
@@ -478,12 +527,15 @@ create policy audit_insert on public.audit for insert to authenticated
 -- 6) Erişim izinleri (anonim erişim yok; güncellenebilir sütunlar sınırlı)
 -- -----------------------------------------------------------------------------
 revoke all on public.profiles, public.orgs, public.members, public.patients, public.sessions,
-              public.acoustic, public.audio_files, public.lexicon, public.audit from anon, authenticated;
+              public.acoustic, public.audio_files, public.lexicon, public.audit,
+              public.words, public.media_files, public.materials from anon, authenticated;
 grant usage on schema public to authenticated;
 grant select on public.profiles, public.orgs, public.members, public.patients, public.sessions,
-                public.acoustic, public.audio_files, public.lexicon, public.audit to authenticated;
+                public.acoustic, public.audio_files, public.lexicon, public.audit,
+                public.words, public.media_files, public.materials to authenticated;
 grant insert, update, delete on public.patients, public.sessions, public.acoustic,
-                                public.audio_files, public.lexicon to authenticated;
+                                public.audio_files, public.lexicon,
+                                public.words, public.media_files, public.materials to authenticated;
 grant insert on public.audit to authenticated;
 grant update (name, title) on public.profiles to authenticated;
 grant update (name, settings) on public.orgs to authenticated;
@@ -523,6 +575,33 @@ create policy morphologai_recordings_update on storage.objects for update to aut
 drop policy if exists morphologai_recordings_delete on storage.objects;
 create policy morphologai_recordings_delete on storage.objects for delete to authenticated
   using (bucket_id = 'recordings'
+         and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o));
+
+-- -----------------------------------------------------------------------------
+-- 8) Görsel deposu: gizli "media" kovası; yol <org_id>/<görsel_id>.<uzantı>
+--    (yalnız PNG/JPEG/WebP, dosya başına 5 MB)
+-- -----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('media', 'media', false, 5242880, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists morphologai_media_select on storage.objects;
+create policy morphologai_media_select on storage.objects for select to authenticated
+  using (bucket_id = 'media'
+         and (storage.foldername(name))[1] in (select o::text from public.my_orgs(1) as o));
+drop policy if exists morphologai_media_insert on storage.objects;
+create policy morphologai_media_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'media'
+              and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o));
+drop policy if exists morphologai_media_update on storage.objects;
+create policy morphologai_media_update on storage.objects for update to authenticated
+  using (bucket_id = 'media'
+         and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o))
+  with check (bucket_id = 'media'
+              and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o));
+drop policy if exists morphologai_media_delete on storage.objects;
+create policy morphologai_media_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'media'
          and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o));
 
 -- Bitti. Kontrol:  select * from public.orgs;  (henüz boş olmalı)

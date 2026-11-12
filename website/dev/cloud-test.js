@@ -242,6 +242,48 @@ async function main() {
   await repoA.patients.remove(p1.id);
   check('Danışan silinince seansları da silinir', (await repoA.sessions.list()).length === 0);
 
+  // 18) Materyal Atölyesi: sözcük bankası, görseller, kayıtlı materyaller
+  const png = new Blob([new Uint8Array(1200)], { type: 'image/png' });
+  const w1 = await repoA.words.save({ word: 'Top', category: 'okul' });
+  const med = await repoA.media.put(png, { label: 'top', width: 10, height: 10 });
+  await repoA.words.save({ word: 'top', category: 'okul', mediaId: med.id });
+  const wl = await repoA.words.list();
+  check('Sözcük bankası: kayıt tekil ve küçük harfli', wl.length === 1 && wl[0].word === 'top' && wl[0].mediaId === med.id && wl[0].id === w1.id, JSON.stringify(wl.map((x) => x.word)));
+  const medGot = await repoA.media.get(med.id);
+  check('Görsel yüklenir ve geri okunur', medGot && medGot.blob.size === 1200 && medGot.blob.type === 'image/png' && (await repoA.media.list()).length === 1);
+  await expectError('Görsel olmayan dosya reddedilir (istemci)', () => repoA.media.put(new Blob(['<svg onload=alert(1)>'], { type: 'image/svg+xml' })), /PNG, JPEG/);
+  const badImg = await sb.from('media_files').insert({ org_id: orgA, path: 'x', mime_type: 'image/svg+xml', size_bytes: 1 }).select('id');
+  check('Görsel olmayan tür veritabanında reddedilir', !!badImg.error, badImg.error?.message);
+  const mat = await repoA.materials.save({ kind: 'cards', title: 'r sözcük başı', params: { targets: 'r' }, content: { items: [{ text: 'top', mediaId: med.id }] } });
+  const matGot = await repoA.materials.get(mat.id);
+  check('Materyal kaydedilir ve içeriğiyle okunur', matGot?.content?.items?.[0]?.text === 'top' && matGot.kind === 'cards' && (await repoA.materials.list()).length === 1);
+  const usageM = await repoA.usage();
+  check('Depolama toplamına görseller de girer', usageM.usage >= 1200, String(usageM.usage));
+
+  await auth.logout();
+  await auth.register({ email: 'zeynep@test.com', password: 'parola123', name: 'Zeynep', orgName: 'Başka Ekip' });
+  const peekW = await sb.from('words').select('*').eq('org_id', orgA);
+  const peekM = await sb.from('media_files').select('*').eq('org_id', orgA);
+  const peekMat = await sb.from('materials').select('*').eq('org_id', orgA);
+  check('Başka ekip sözcük, görsel ve materyalleri göremez', !peekW.data?.length && !peekM.data?.length && !peekMat.data?.length);
+  const sneakW = await sb.from('words').insert({ org_id: orgA, word: 'sızma', data: {} }).select('id');
+  check('Başka ekibe sözcük yazılamaz', !!sneakW.error || !sneakW.data?.length, sneakW.error?.message);
+  const dlM = await sb.storage.from('media').download(medGot.path);
+  check('Başka ekibin görseli indirilemez', !!dlM.error, dlM.error?.message);
+  const upM = await sb.storage.from('media').upload(`${orgA}/sizma.png`, png, { contentType: 'image/png' });
+  check('Başka ekibin görsel klasörüne yüklenemez', !!upM.error, upM.error?.message);
+
+  await auth.logout();
+  await auth.login('ayse@test.com', 'yeniParola1');
+  ctxA = await auth.loadContext();
+  repoA = createRepo(ctxA);
+  await repoA.media.remove(med.id);
+  const leftM = (await pg.query("select count(*)::int as n from storage.objects where bucket_id = 'media'")).rows[0].n;
+  check('Görsel silinince depo nesnesi de silinir', leftM === 0 && (await repoA.media.list()).length === 0, `${leftM} nesne kaldı`);
+  await repoA.materials.remove(mat.id);
+  await repoA.words.remove(w1.id);
+  check('Materyal ve sözcük silinir', (await repoA.materials.list()).length === 0 && (await repoA.words.list()).length === 0);
+
   // Özet
   const pass = results.filter((r) => r.ok).length;
   sum.textContent = `${pass} / ${results.length} test geçti`;

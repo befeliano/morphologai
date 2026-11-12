@@ -734,3 +734,35 @@ table.table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .shell { display: block; }
   .card { box-shadow: none; break-inside: avoid; }
 }
+/* Materyal Atölyesi */
+.mat-tool { align-items: start; }
+.mat-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.mat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mat-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--surface); font-size: 13px; color: var(--text); cursor: pointer; }
+.mat-chip.off { opacity: 0.45; text-decoration: line-through; }
+.mat-chip.wide { color: var(--muted); border-style: dashed; }
+.mat-chip .tiny { color: var(--faint); }
+.mat-hit { color: var(--coral, #c2410c); text-decoration: underline; text-underline-offset: 3px; }
+.mat-preview { max-height: 560px; overflow: auto; padding: 4px; }
+.mat-cards { display: grid; gap: 8px; }
+.mat-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; background: var(--surface); min-width: 0; }
+.mat-word { margin-top: 6px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.mat-img { object-fit: contain; border-radius: 8px; background: var(--surface-2); max-width: 100%; }
+.mat-img.missing { visibility: hidden; height: 8px !important; }
+.mat-list { margin: 0; padding-left: 22px; line-height: 2; font-size: 15px; }
+.mat-pairs { display: flex; flex-wrap: wrap; gap: 12px; }
+.mat-pair { display: flex; align-items: center; gap: 8px; }
+.mat-match { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+.mat-match-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 62px; font-size: 16px; }
+.mat-lettergrid { display: grid; gap: 2px; margin: 0 auto; }
+.mat-lettergrid span { aspect-ratio: 1; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 14px; }
+.mat-lettergrid span.on { background: var(--warn-bg); font-weight: 700; }
+.mat-cross { display: grid; gap: 0; width: max-content; margin: 0 auto; max-width: 100%; overflow-x: auto; }
+.mat-cross span { width: 30px; height: 30px; }
+.mat-cross .cell { position: relative; border: 1px solid var(--text-2); display: grid; place-items: center; font-family: var(--mono); font-size: 14px; margin: -0.5px; }
+.mat-cross .cell i { position: absolute; top: 0; left: 2px; font-size: 8px; font-style: normal; color: var(--muted); }
+.mat-ipa { font-family: var(--mono); font-size: 19px; line-height: 1.7; overflow-wrap: anywhere; min-height: 60px; }
+.mat-media { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.mat-media-item { border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: grid; gap: 8px; justify-items: center; }
+.mat-media-item .input { min-width: 0; height: 34px; }
+@media (max-width: 900px) { .mat-tool { grid-template-columns: minmax(0, 1fr); } }

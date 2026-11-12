@@ -24,6 +24,7 @@ const ROUTES = [
   { path: '/analiz', load: () => import('./views/analytics.js'), nav: 'analytics' },
   { path: '/ongoru', load: () => import('./views/study.js'), nav: 'study' },
   { path: '/ongoru/:id', load: () => import('./views/studySession.js'), nav: 'study' },
+  { path: '/materyal', load: () => import('./views/materials.js'), nav: 'materials' },
   { path: '/ekip', load: () => import('./views/team.js'), nav: 'team' },
   { path: '/ayarlar', load: () => import('./views/settings.js'), nav: 'settings' },
   { path: '/yontem', load: () => import('./views/methods.js'), nav: 'methods' },

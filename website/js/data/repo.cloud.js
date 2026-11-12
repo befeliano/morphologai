@@ -14,7 +14,7 @@ import { uuid } from './crypto.js';
 import { can } from './roles.js';
 import { audit } from './auth.cloud.js';
 import { toJsonSafe, fromJsonSafe } from './typed.js';
-import { extFor, safeAudioMime } from './mime.js';
+import { extFor, safeAudioMime, safeImageBlob, imageExtFor } from './mime.js';
 import { cacheGet, cachePut, cacheDelete } from './audioCache.js';
 
 const BUCKET = 'recordings';
@@ -384,6 +384,124 @@ export function createCloudRepo(ctx) {
     },
   };
 
+  // -------------------------------------------------------------------------
+  // Materyal Atölyesi: sözcük bankası, görseller (Storage "media"), kayıtlı materyaller
+  // -------------------------------------------------------------------------
+  const MEDIA_BUCKET = 'media';
+  const normWord = (w) => String(w || '').trim().toLocaleLowerCase('tr-TR');
+  const wFromRow = (r) => ({ ...(r.data || {}), id: r.id, orgId: r.org_id, word: r.word, createdAt: r.created_at, updatedAt: r.updated_at });
+  const words = {
+    async list() {
+      const all = await cached('words', async () => (await fetchAll(() => sb.from('words').select('*').eq('org_id', orgId).order('id'))).map(wFromRow));
+      return [...all].sort((a, b) => a.word.localeCompare(b.word, 'tr'));
+    },
+    async save(w) {
+      ensure('lexicon.write');
+      const word = normWord(w.word);
+      if (!word || word.length > 60) throw new Error('Sözcük 1–60 karakter olmalı.');
+      const { category = null, ageBand = null, mediaId = null, hidden = false } = w;
+      const r = check(await sb.from('words').upsert({ org_id: orgId, word, data: { category, ageBand, mediaId, hidden: !!hidden } }, { onConflict: 'org_id,word' }).select('*').single(), 'Sözcük kaydedilemedi.');
+      invalidate('words');
+      return wFromRow(r);
+    },
+    async remove(id) {
+      ensure('lexicon.write');
+      check(await sb.from('words').delete().eq('id', id).eq('org_id', orgId));
+      invalidate('words');
+    },
+  };
+
+  const mFromRow = (r) => ({ id: r.id, orgId: r.org_id, label: r.meta?.label || '', width: r.meta?.width || null, height: r.meta?.height || null, mimeType: r.mime_type, sizeBytes: Number(r.size_bytes), path: r.path, createdAt: r.created_at });
+  const mediaBlobs = new Map(); // oturum içi önbellek (görseller küçük)
+  const media = {
+    async list() {
+      const all = await cached('media', async () => (await fetchAll(() => sb.from('media_files').select('*').eq('org_id', orgId).order('id'))).map(mFromRow));
+      return [...all].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    },
+    async put(blob, meta = {}) {
+      ensure('lexicon.write');
+      const safe = safeImageBlob(blob, blob.type || meta.mimeType);
+      if (safe.size > 5 * MB) throw new Error('Görsel 5 MB sınırını aşıyor.');
+      const id = uuid();
+      const path = `${orgId}/${id}.${imageExtFor(safe.type)}`;
+      const up = await sb.storage.from(MEDIA_BUCKET).upload(path, safe, { contentType: safe.type, upsert: false, cacheControl: '31536000' });
+      if (up.error) throw storageError(up.error);
+      try {
+        const row = check(await sb.from('media_files').insert({
+          id, org_id: orgId, bucket: MEDIA_BUCKET, path, mime_type: safe.type, size_bytes: safe.size,
+          meta: { label: String(meta.label || '').slice(0, 80), width: meta.width || null, height: meta.height || null },
+        }).select('*').single(), 'Görsel bilgisi yazılamadı.');
+        mediaBlobs.set(id, safe);
+        invalidate('media');
+        return mFromRow(row);
+      } catch (err) {
+        await sb.storage.from(MEDIA_BUCKET).remove([path]).catch(() => {});
+        throw err;
+      }
+    },
+    async get(id) {
+      if (!id) return null;
+      const row = check(await sb.from('media_files').select('*').eq('id', id).eq('org_id', orgId).maybeSingle());
+      if (!row) return null;
+      let blob = mediaBlobs.get(id);
+      if (!blob) {
+        const res = await sb.storage.from(row.bucket || MEDIA_BUCKET).download(row.path);
+        if (res.error) throw storageError(res.error);
+        blob = safeImageBlob(res.data, row.mime_type);
+        mediaBlobs.set(id, blob);
+      }
+      return { ...mFromRow(row), blob };
+    },
+    async update(id, patch) {
+      ensure('lexicon.write');
+      const row = check(await sb.from('media_files').select('*').eq('id', id).eq('org_id', orgId).maybeSingle());
+      if (!row) return null;
+      const meta = { ...(row.meta || {}), label: String(patch.label ?? row.meta?.label ?? '').slice(0, 80) };
+      const r = check(await sb.from('media_files').update({ meta }).eq('id', id).eq('org_id', orgId).select('*').single(), 'Görsel güncellenemedi.');
+      invalidate('media');
+      return mFromRow(r);
+    },
+    async remove(id) {
+      ensure('lexicon.write');
+      const row = check(await sb.from('media_files').select('*').eq('id', id).eq('org_id', orgId).maybeSingle());
+      if (!row) return;
+      const res = await sb.storage.from(row.bucket || MEDIA_BUCKET).remove([row.path]);
+      if (res.error) throw storageError(res.error);
+      check(await sb.from('media_files').delete().eq('id', id).eq('org_id', orgId));
+      mediaBlobs.delete(id);
+      invalidate('media');
+    },
+  };
+
+  const matFromRow = (r) => ({ ...(r.data || {}), id: r.id, orgId: r.org_id, patientId: r.patient_id, kind: r.kind, title: r.title, createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at });
+  const materials = {
+    async list() {
+      const rows = await cached('materials', async () => (await fetchAll(() => sb.from('materials').select('*').eq('org_id', orgId).order('id'))).map(matFromRow));
+      return [...rows].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    },
+    async get(id) {
+      if (!id) return null;
+      const r = check(await sb.from('materials').select('*').eq('id', id).eq('org_id', orgId).maybeSingle());
+      return r ? matFromRow(r) : null;
+    },
+    async save(m) {
+      ensure('session.write');
+      const row = { org_id: orgId, patient_id: m.patientId || null, kind: String(m.kind || 'other').slice(0, 40), title: String(m.title || '').slice(0, 160), data: toJsonSafe({ params: m.params || {}, content: m.content || {} }) };
+      const res = m.id
+        ? await sb.from('materials').update({ patient_id: row.patient_id, kind: row.kind, title: row.title, data: row.data }).eq('id', m.id).eq('org_id', orgId).select('*')
+        : await sb.from('materials').insert(row).select('*');
+      const data = check(res, 'Materyal kaydedilemedi.');
+      if (!data?.length) throw new Error('Materyal kaydedilemedi (yetkiniz olmayabilir).');
+      invalidate('materials');
+      return matFromRow(data[0]);
+    },
+    async remove(id) {
+      ensure('session.write');
+      check(await sb.from('materials').delete().eq('id', id).eq('org_id', orgId));
+      invalidate('materials');
+    },
+  };
+
   return {
     kind: 'cloud',
     ctx,
@@ -392,6 +510,9 @@ export function createCloudRepo(ctx) {
     audio,
     acoustic,
     lexicon,
+    words,
+    media,
+    materials,
     audit: {
       async list(limit = 100) {
         const rows = check(await sb.from('audit').select('*').eq('org_id', orgId).order('at', { ascending: false }).limit(limit)) || [];

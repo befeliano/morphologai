@@ -7,7 +7,7 @@ import * as db from './db.js';
 import { uuid } from './crypto.js';
 import { can } from './roles.js';
 import { audit } from './auth.local.js';
-import { safeAudioMime, safeAudioBlob } from './mime.js';
+import { safeAudioMime, safeAudioBlob, safeImageBlob } from './mime.js';
 
 const now = () => new Date().toISOString();
 
@@ -176,6 +176,81 @@ export function createLocalRepo(ctx) {
     },
   };
 
+  // ---- Materyal Atölyesi: sözcük bankası, görseller, kayıtlı materyaller ----
+  const normWord = (w) => String(w || '').trim().toLocaleLowerCase('tr-TR');
+  const words = {
+    async list() {
+      return (await db.byIndex('words', 'orgId', orgId)).sort((a, b) => a.word.localeCompare(b.word, 'tr'));
+    },
+    /** { word, category, ageBand, mediaId, hidden } — sözcük ekibin bankasında tekildir */
+    async save(w) {
+      ensure('lexicon.write');
+      const word = normWord(w.word);
+      if (!word || word.length > 60) throw new Error('Sözcük 1–60 karakter olmalı.');
+      const existing = (await words.list()).find((x) => x.word === word);
+      const { category = null, ageBand = null, mediaId = null, hidden = false } = w;
+      const rec = { id: existing ? existing.id : uuid(), orgId, word, category, ageBand, mediaId, hidden: !!hidden, createdAt: existing ? existing.createdAt : now(), updatedAt: now() };
+      await db.put('words', rec);
+      return rec;
+    },
+    async remove(id) {
+      ensure('lexicon.write');
+      if (own(await db.get('words', id))) await db.del('words', id);
+    },
+  };
+
+  const mediaMeta = ({ blob: _b, ...m }) => m;
+  const media = {
+    async list() {
+      return (await db.byIndex('media', 'orgId', orgId)).map(mediaMeta).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    },
+    async put(blob, meta = {}) {
+      ensure('lexicon.write');
+      const safe = safeImageBlob(blob, blob.type || meta.mimeType);
+      if (safe.size > 5 * 1024 * 1024) throw new Error('Görsel 5 MB sınırını aşıyor.');
+      const rec = { id: uuid(), orgId, label: String(meta.label || '').slice(0, 80), width: meta.width || null, height: meta.height || null, mimeType: safe.type, sizeBytes: safe.size, blob: safe, createdAt: now() };
+      await db.put('media', rec);
+      return mediaMeta(rec);
+    },
+    async get(id) {
+      const r = own(await db.get('media', id));
+      return r ? { ...r, blob: safeImageBlob(r.blob, r.mimeType) } : null;
+    },
+    async update(id, patch) {
+      ensure('lexicon.write');
+      const r = own(await db.get('media', id));
+      if (!r) return null;
+      const rec = { ...r, label: String(patch.label ?? r.label ?? '').slice(0, 80) };
+      await db.put('media', rec);
+      return mediaMeta(rec);
+    },
+    async remove(id) {
+      ensure('lexicon.write');
+      if (own(await db.get('media', id))) await db.del('media', id);
+    },
+  };
+
+  const materials = {
+    async list() {
+      return (await db.byIndex('materials', 'orgId', orgId)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    },
+    async get(id) { return own(await db.get('materials', id)); },
+    async save(m) {
+      ensure('session.write');
+      const prev = m.id ? await materials.get(m.id) : null;
+      const rec = {
+        id: prev ? prev.id : uuid(), orgId, patientId: m.patientId || null, kind: String(m.kind || 'other').slice(0, 40), title: String(m.title || '').slice(0, 160),
+        params: m.params || {}, content: m.content || {}, createdAt: prev ? prev.createdAt : now(), createdBy: prev ? prev.createdBy : userId, updatedAt: now(),
+      };
+      await db.put('materials', rec);
+      return rec;
+    },
+    async remove(id) {
+      ensure('session.write');
+      if (await materials.get(id)) await db.del('materials', id);
+    },
+  };
+
   return {
     kind: 'local',
     ctx,
@@ -184,6 +259,9 @@ export function createLocalRepo(ctx) {
     audio,
     acoustic,
     lexicon,
+    words,
+    media,
+    materials,
     audit: {
       async list(limit = 100) {
         return (await db.byIndex('audit', 'orgId', orgId)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);

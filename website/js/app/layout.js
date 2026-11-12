@@ -9,6 +9,7 @@ const NAV = [
   { id: 'sessions', label: 'Geçmiş seanslar', icon: 'folder', href: '#/seanslar', count: 'sessions' },
   { id: 'analytics', label: 'Analiz', icon: 'pieChart', href: '#/analiz' },
   { id: 'study', label: 'Öngörü çalışması', icon: 'target', href: '#/ongoru' },
+  { id: 'materials', label: 'Materyal Atölyesi', icon: 'grid', href: '#/materyal' },
   { group: 'Ekip' },
   { id: 'team', label: 'Ekip ve üyeler', icon: 'team', href: '#/ekip' },
   { id: 'settings', label: 'Ayarlar', icon: 'settings', href: '#/ayarlar' },

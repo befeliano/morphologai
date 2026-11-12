@@ -22,3 +22,13 @@ export function safeAudioBlob(blob, mime) {
   const t = safeAudioMime(mime ?? blob?.type);
   return blob && blob.type === t ? blob : new Blob([blob], { type: t });
 }
+
+/** Görsel türleri: yalnız raster (SVG betik taşıyabilir). Diğerleri reddedilir. */
+const IMG_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+export const isSafeImageMime = (mime) => !!IMG_EXT[String(mime || '').split(';')[0].trim().toLowerCase()];
+export const imageExtFor = (mime) => IMG_EXT[String(mime || '').split(';')[0].trim().toLowerCase()] || null;
+export function safeImageBlob(blob, mime) {
+  const t = String(mime ?? blob?.type ?? '').split(';')[0].trim().toLowerCase();
+  if (!IMG_EXT[t]) throw new Error('Yalnızca PNG, JPEG ya da WebP görseller yüklenebilir.');
+  return blob.type === t ? blob : new Blob([blob], { type: t });
+}

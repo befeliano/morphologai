@@ -113,7 +113,96 @@ export async function runAll() {
     results.push({ kind: 'context', input: `${s} (#${idx + 1})`, expected: `${POS[pos]} — ${note}`, got: t ? `${chainOf(t.a)} [${t.a.pos}]${t.a.context ? ' · ' + t.a.context.rule : ''}` : '—', ok });
   }
   await studyTests(results);
+  await materialTests(results);
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Materyal Atölyesi: fonetik motor, sözcük bankası, üreticiler
+// ---------------------------------------------------------------------------
+async function materialTests(results) {
+  const P = await import('../js/core/text/phonetics.js');
+  const B = await import('../js/core/materials/wordbank.js');
+  const G = await import('../js/core/materials/generators.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'materyal', input, expected, got: String(got), ok: !!ok });
+  const eq = (label, got, exp) => add(label, exp, got, got === exp);
+
+  // Heceleme
+  for (const [w, exp] of [
+    ['kitaplar', 'ki-tap-lar'], ['araba', 'a-ra-ba'], ['türkçe', 'türk-çe'], ['saat', 'sa-at'], ['tren', 'tren'], ['kontrol', 'kont-rol'],
+    ['elma', 'el-ma'], ['ağaç', 'a-ğaç'], ['kelebek', 'ke-le-bek'], ['uçurtma', 'u-çurt-ma'], ['at', 'at'], ['öğretmen', 'öğ-ret-men'],
+    ['kaplumbağa', 'kap-lum-ba-ğa'], ['ambulans', 'am-bu-lans'], ['iyi', 'i-yi'], ['spor', 'spor'],
+  ]) eq(`hece: ${w}`, P.syllabify(w).join('-'), exp);
+
+  // IPA
+  for (const [w, exp] of [
+    ['kedi', 'ce.di'], ['kalem', 'ka.lem'], ['gül', 'ɟyl'], ['göl', 'ɟœl'], ['kuş', 'kuʃ'], ['dağ', 'daː'], ['ağaç', 'a.atʃ'],
+    ['değil', 'de.jil'], ['çocuk', 'tʃo.dʒuk'], ['şeker', 'ʃe.ceɾ'], ['jeton', 'ʒe.ton'], ['yıldız', 'jɯɫ.dɯz'], ['araba', 'a.ɾa.ba'],
+    ['öğretmen', 'œː.ɾet.men'], ['kâğıt', 'caː.ɯt'], ['renk', 'ɾeŋc'], ['tavuk', 'ta.ʋuk'], ['ev', 'ev'], ['balık', 'ba.ɫɯk'], ['üzüm', 'y.zym'],
+  ]) eq(`IPA: ${w}`, P.toIPAWord(w), exp);
+  eq('IPA: metin', P.toIPA('Kedi süt içti.').ipa, '/ce.di syt itʃ.ti./');
+
+  // Pozisyon
+  const pos = (w, t) => { const p = P.positionsOf(w, t); return ['initial', 'medial', 'final', 'medialOnset', 'medialCoda'].filter((k) => p[k]).join(','); };
+  eq('pozisyon: r @ araba', pos('araba', 'r'), 'medial,medialOnset');
+  eq('pozisyon: r @ rüzgar', pos('rüzgar', 'r'), 'initial,final');
+  eq('pozisyon: r @ kartal', pos('kartal', 'r'), 'medial,medialCoda');
+  eq('pozisyon: ş @ kuş', pos('kuş', 'ʃ'), 'final');
+  eq('pozisyon: yok', pos('elma', 'k'), '');
+  eq('vurgulama', P.highlightParts('Araba', 'r').map((x) => (x.hit ? `[${x.text}]` : x.text)).join(''), 'A[r]aba');
+
+  // Sözcük bankası ve süzgeç
+  const bank = B.buildBank({ custom: [{ word: 'Zımba', category: 'okul' }, { word: 'kedi', hidden: true }, { word: 'top', mediaId: 'm1' }] });
+  add('banka: çekirdek + ekip', '≥ 500 sözcük, zımba var, kedi gizli', `${bank.length}`, bank.length >= 500 && bank.some((w) => w.word === 'zımba' && w.source === 'custom') && !bank.some((w) => w.word === 'kedi'));
+  const f1 = B.filterWords(bank, { targets: 'r', positions: ['initial'], syllables: [2] });
+  add('süzgeç: /r/ sözcük başı, 2 hece', 'hepsi r ile başlar ve 2 heceli', f1.words.slice(0, 5).map((w) => w.word).join(','), f1.words.length > 0 && f1.words.every((w) => w.word[0] === 'r' && w.syllables === 2));
+  const f2 = B.filterWords(bank, { targets: 'k', exclude: 'r,s', categories: ['hayvan'] });
+  add('süzgeç: hariç tutulan sesler', 'r ve s içermez, hayvan', f2.words.slice(0, 5).map((w) => w.word).join(','), f2.words.length > 0 && f2.words.every((w) => !/[rs]/.test(w.word) && w.word.includes('k') && w.category === 'hayvan'));
+  const f3 = B.filterWords(bank, { targets: 'j', positions: ['final'], syllables: [1] });
+  add('süzgeç: yetersiz sonuçta ipucu', 'ipucu metni var', f3.hint ? 'var' : 'yok', f3.words.length < 6 && !!f3.hint);
+  const f4 = B.filterWords(bank, { onlyWithImage: true });
+  eq('süzgeç: yalnız görselli', f4.words.map((w) => w.word).join(','), 'top');
+  eq('mastar', `${B.infinitive('gel')} ${B.infinitive('oku')}`, 'gelmek okumak');
+
+  // Minimal çiftler
+  const mp = G.minimalPairs(bank, 'k', 't');
+  add('minimal çift: k–t', 'her çift tek harfle ayrılır', mp.slice(0, 4).map((p) => `${p.a.word}/${p.b.word}`).join(' '), mp.length > 0 && mp.every((p) => p.a.word.length === p.b.word.length && p.a.word[p.index] === 'k' && p.b.word[p.index] === 't'));
+  const mp2 = G.minimalPairs(['kaş', 'taş', 'kol', 'yol', 'bal', 'dal'], 'k', 't', { position: 'initial' });
+  eq('minimal çift: konum', mp2.map((p) => `${p.a}/${p.b}`).join(' '), 'kaş/taş');
+
+  // İkili ifade
+  const tw = G.twoWordPhrases(bank, { target: 'k', mode: 'adj-noun', both: true, count: 6, seed: 3 });
+  add('ikili ifade: sıfat + ad, iki sözcükte de /k/', '6 öbek', tw.slice(0, 3).map((x) => x.text).join(' · '), tw.length === 6 && tw.every((x) => x.first.word.includes('k') && x.second.word.includes('k') && x.first.pos === 'adj'));
+  const twR = G.twoWordPhrases(bank, { target: 'k', mode: 'adj-noun', both: true, count: 6, seed: 3 });
+  eq('tohum: aynı tohum aynı sonuç', twR.map((x) => x.text).join('|'), tw.map((x) => x.text).join('|'));
+
+  // Sözcük avı
+  const ws = G.wordSearch(['kedi', 'köpek', 'kuş', 'balık', 'tavşan'], { seed: 7 });
+  const readBack = (p) => Array.from({ length: p.word.length }, (_, i) => ws.grid[p.row + p.dr * i][p.col + p.dc * i]).join('');
+  add('sözcük avı', '5 sözcük ızgarada okunur, boş hücre yok', `${ws.size}×${ws.size}, ${ws.placements.length} sözcük`, ws.placements.length === 5 && ws.placements.every((p) => readBack(p) === p.word) && ws.grid.every((r) => r.every(Boolean)));
+
+  // Karışık harfler
+  const sc = G.scramble(['kalem', 'masa'], { seed: 2 });
+  add('karışık harfler', 'aynı harfler, farklı sıra', sc.map((s) => s.scrambled).join(' / '), sc.every((s) => [...s.scrambled.replace(/ /g, '')].sort().join('') === [...s.word.toLocaleUpperCase('tr-TR')].sort().join('') && s.scrambled.replace(/ /g, '') !== s.word.toLocaleUpperCase('tr-TR')));
+
+  // Çengel bulmaca
+  const cw = G.crossword(['kelebek', 'kedi', 'elma', 'balık', 'kalem', 'masa'], { seed: 5 });
+  const cellAt = (r, c) => cw.cells.find((x) => x.r === r && x.c === c)?.ch;
+  const cwOk = cw.entries.every((e) => [...e.word].every((ch, i) => cellAt(e.dir === 'across' ? e.row : e.row + i, e.dir === 'across' ? e.col + i : e.col) === ch));
+  add('çengel bulmaca', '≥ 4 sözcük kesişerek yerleşir', `${cw.entries.length} sözcük, ${cw.rows}×${cw.cols}`, cw.entries.length >= 4 && cwOk);
+
+  // Labirent
+  const mz = G.letterMaze('kelebek', { seed: 4 });
+  const adjacent = mz.path.every((p, i) => i === 0 || Math.abs(p[0] - mz.path[i - 1][0]) + Math.abs(p[1] - mz.path[i - 1][1]) === 1);
+  eq('labirent: yol sözcüğü verir', mz.path.map(([r, c]) => mz.grid[r][c]).join('') + (adjacent ? '' : ' (bitişik değil)'), 'KELEBEK');
+
+  // Cümle tamamlama: istenen zamanda ve kısa
+  const st = G.sentenceStems({ topics: ['hayvan'], tense: 'past', count: 5, seed: 1 });
+  add('cümle başlangıçları', '5 cümle, hayvan + geçmiş', st.length, st.length === 5 && st.every((s) => s.topic === 'hayvan' && s.tense === 'past'));
+  const stShort = G.sentenceStems({ maxWords: 3, count: 8, seed: 1 });
+  add('cümle başlangıçları: kısa', 'en çok 3 sözcük', stShort.length, stShort.length > 0 && stShort.every((s) => s.text.replace('…', '').trim().split(/\s+/).length <= 3));
+  const wh = G.whQuestions(['top'], { types: ['ne', 'nerede'], seed: 1 });
+  eq('5N1K', wh[0].questions.map((q) => q.type).join(','), 'ne,nerede');
 }
 
 // ---------------------------------------------------------------------------

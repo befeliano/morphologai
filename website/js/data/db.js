@@ -20,7 +20,7 @@
  */
 
 const DB_NAME = 'morphologai-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise = null;
 
 const STORES = {
@@ -34,6 +34,9 @@ const STORES = {
   audio: { keyPath: 'id', indexes: [['orgId', 'orgId'], ['sessionId', 'sessionId']] },
   lexicon: { keyPath: 'id', indexes: [['orgId', 'orgId']] },
   audit: { keyPath: 'id', indexes: [['orgId', 'orgId']] },
+  words: { keyPath: 'id', indexes: [['orgId', 'orgId']] },
+  media: { keyPath: 'id', indexes: [['orgId', 'orgId']] },
+  materials: { keyPath: 'id', indexes: [['orgId', 'orgId']] },
 };
 
 export function openDB() {
