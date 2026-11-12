@@ -114,6 +114,7 @@ export async function runAll() {
   }
   await studyTests(results);
   await materialTests(results);
+  await bridgeTests(results);
   return results;
 }
 
@@ -304,4 +305,20 @@ async function studyTests(results) {
   const devSet = outcomeDomainSet({ status: 'developed', domains: ['semantic', 'pragmatic'] });
   const acc = domainAccuracy({ semantic: true, pragmatic: false, morphological: false, syntactic: null }, devSet);
   add('alan isabeti', 'gelişmedi → boş küme; 2/3', `${none.size} · ${acc.correct}/${acc.total}`, none.size === 0 && acc.correct === 2 && acc.total === 3 && outcomeDomainSet({ status: 'developed' }) === null && outcomeDomainSet({ status: 'unclear' }) === null);
+}
+
+// Analizden materyale köprü
+export async function bridgeTests(results) {
+  const { singleDiff, suggestSoundTargets, errorPairsFromResult } = await import('../js/core/materials/bridge.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'materyal', input, expected, got: String(got), ok: !!ok });
+  const d1 = singleDiff('tedi', 'kedi');
+  add('köprü: değiştirme', 'k yerine t, sözcük başı', JSON.stringify(d1), d1?.expected === 'k' && d1.produced === 't' && d1.position === 'initial');
+  const d2 = singleDiff('aaba', 'araba');
+  add('köprü: düşürme', 'r düştü, sözcük ortası', JSON.stringify(d2), d2?.type === 'omission' && d2.expected === 'r' && d2.position === 'medial');
+  add('köprü: iki fark → öneri yok', 'null', singleDiff('masa', 'kase'), singleDiff('masa', 'kase') === null);
+  const t = suggestSoundTargets([{ word: 'tedi', target: 'kedi' }, { word: 'tuş', target: 'kuş' }, { word: 'aaba', target: 'araba' }, { word: 'balıt', target: 'balık' }]);
+  add('köprü: hedef ses sıralaması', 'k (3 kez, yerine t), r (1 kez, düşme)', t.map((x) => `${x.sound}:${x.count}`).join(' '), t[0].sound === 'k' && t[0].count === 3 && t[0].substitutes[0] === 't' && t[0].positions[0] === 'initial' && t[1].sound === 'r' && t[1].omissions === 1);
+  const r = analyzeSession({ transcript: 'tedi [: kedi] süt içti.\nT: tuş [: kuş] mu?', final: true });
+  const pairs = errorPairsFromResult(r);
+  add('köprü: transkriptten çiftler (terapist hariç)', 'tedi→kedi', pairs.map((p) => `${p.word}→${p.target}`).join(','), pairs.length === 1 && pairs[0].target === 'kedi' && pairs[0].coded);
 }

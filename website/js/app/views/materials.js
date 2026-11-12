@@ -59,7 +59,18 @@ export async function render(root, { query }, app) {
     // Silinmiş görsele bağlı sözcükler görselsiz sayılır
     S.customLive = S.custom.map((c) => (c.mediaId && !S.mediaIds.has(c.mediaId) ? { ...c, mediaId: null } : c));
   }
-  await reload();
+  try {
+    await reload();
+  } catch (err) {
+    // Bulut şeması güncellenmemişse (words / media_files / materials tabloları yoksa) yol göster
+    mount(root, h('div.card', null, h('div.card-body', null, emptyState({
+      icon: 'database', title: 'Materyal Atölyesi için veritabanı güncellemesi gerekli',
+      text: app.backend?.isCloud
+        ? 'Supabase panelinde SQL Editor\'ı açıp depodaki supabase/schema.sql dosyasının tamamını yeniden çalıştırın (mevcut verilere dokunmaz), sonra bu sayfayı yenileyin.'
+        : `Veriler yüklenemedi: ${err.message}`,
+    }), h('p.tiny.muted', { style: { textAlign: 'center' } }, err.message))));
+    return undefined;
+  }
   const bank = (wide = false) => buildBank({ custom: S.customLive, lexicon: wide ? getLexicon() : null, wide });
   const customOf = (word) => S.customLive.find((c) => c.word === word) || null;
 
@@ -295,9 +306,9 @@ export async function render(root, { query }, app) {
     },
 
     pairs() {
-      const set = select([...PAIR_SETS.map((p) => ({ id: p.id, label: p.label })), { id: 'custom', label: 'Başka bir çift…' }], 'k-t');
-      const a = h('input.input', { maxlength: 2, value: 'k', style: { width: '70px' } });
-      const b = h('input.input', { maxlength: 2, value: 't', style: { width: '70px' } });
+      const set = select([...PAIR_SETS.map((p) => ({ id: p.id, label: p.label })), { id: 'custom', label: 'Başka bir çift…' }], PAIR_SETS.find((x) => x.a === query.a && x.b === query.b)?.id || (query.a && query.b ? 'custom' : 'k-t'));
+      const a = h('input.input', { maxlength: 2, value: (query.a || 'k').slice(0, 2), style: { width: '70px' } });
+      const b = h('input.input', { maxlength: 2, value: (query.b || 't').slice(0, 2), style: { width: '70px' } });
       const position = select([{ id: '', label: 'Her konum' }, { id: 'initial', label: 'Sözcük başı' }, { id: 'medial', label: 'Sözcük ortası' }, { id: 'final', label: 'Sözcük sonu' }], '');
       const wide = h('input', { type: 'checkbox' });
       const limit = h('input.input', { type: 'number', min: 1, max: 30, value: 8, style: { width: '84px' } });

@@ -58,6 +58,16 @@ const SEED = {
     yorgun aç tok dolu boş açık kapalı yüksek alçak kalın ince geniş dar`,
 };
 
+/**
+ * Minimal çift çalışmaları için ek kısa sözcükler (kategorisiz). Çekirdek listedeki sözcüklerle
+ * ya da birbirleriyle tek ses farkı oluştururlar (kaş–taş, gül–kül, kar–kal, çay–tay, şal–sal…).
+ */
+const PAIR_EXTRA = `kas tas kel tel kat tat tek kan tan kül tül koz toz kop sal şal dal sel sis şiş tuz kuz sop sek
+  kal bar bal dar sor sol kır kıl yer yel kor ray yay kay bul pul bay pay bas pas dil til tar dek dam tam dün tün
+  göz köz gaz gar zar sar kaz tos buz bus az as tay çam çok tok saç sat kaç üç üt cam can dan var far av af
+  mal nal mor fil pil fas şam çal şık sık çık şok baş şu soy koy tüy düş diş tat dut kut but bit kit kil tel
+  dere tere sarı darı kale lale yaka paça maça kova kona masa kasa tasa pasta basta halı dalı sıra kıra kuzu kutu`;
+
 /** Çekirdek liste: [{word, category}] — tekrarlar ilk kategoride kalır. */
 export const SEED_WORDS = (() => {
   const seen = new Set();
@@ -68,6 +78,11 @@ export const SEED_WORDS = (() => {
       seen.add(w);
       out.push({ word: w, category });
     }
+  }
+  for (const w of PAIR_EXTRA.trim().split(/\s+/)) {
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push({ word: w, category: null });
   }
   return out;
 })();
@@ -86,7 +101,7 @@ function entry(word, extra = {}) {
  */
 export function buildBank({ custom = [], lexicon = null, wide = false } = {}) {
   const map = new Map();
-  for (const s of SEED_WORDS) map.set(s.word, entry(s.word, { category: s.category, ageBand: '2-4', pos: s.category === 'eylem' ? 'verb' : s.category === 'nitelik' ? 'adj' : 'noun' }));
+  for (const s of SEED_WORDS) map.set(s.word, entry(s.word, { category: s.category, ageBand: s.category ? '2-4' : null, pos: s.category === 'eylem' ? 'verb' : s.category === 'nitelik' ? 'adj' : 'noun' }));
   for (const c of custom) {
     const w = trLower(c.word || '').trim();
     if (!w) continue;

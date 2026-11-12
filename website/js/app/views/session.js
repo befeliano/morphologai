@@ -22,6 +22,7 @@ import { analyzeAudio, splitAcoustic } from '../pipeline.js';
 import { transcribeAudioBuffer, segmentsToTranscript, sttCapabilities } from '../../core/stt/webspeech.js';
 import { whisperTranscribe, WHISPER_MODELS, hasWebGPU, defaultWhisperModel } from '../../core/stt/whisper.js';
 import { decodeToMono16k } from '../../core/audio/decode.js';
+import { suggestSoundTargets, errorPairsFromResult } from '../../core/materials/bridge.js';
 
 export async function render(root, { params, query }, app) {
   let session = await app.repo.sessions.get(params.id);
@@ -242,7 +243,32 @@ export async function render(root, { params, query }, app) {
         h('div.card-body', null, h('div.row', { style: { gap: '6px' } }, L.errors.unknownList.map((w) => {
           const cand = L.errors.phonologicalCandidates.find((c) => c.word === w);
           return badge(cand ? `${w} → ${cand.target}?` : w, cand ? 'warn' : 'danger');
-        })), h('p.tiny.muted.mt-2', null, 'Parafazi olduğunu düşündüklerinizi transkriptte [* p] / [* n] ile kodlayın; hedef sözcüğü [: hedef] ile ekleyin.'))) : null);
+        })), h('p.tiny.muted.mt-2', null, 'Parafazi olduğunu düşündüklerinizi transkriptte [* p] / [* n] ile kodlayın; hedef sözcüğü [: hedef] ile ekleyin.'))) : null,
+      soundTargetsCard());
+  };
+
+  // Analizden materyale köprü: ses hatalarından hedef ses önerisi ve o filtreyle Materyal Atölyesi
+  const POS_TR = { initial: 'sözcük başı', medial: 'sözcük ortası', final: 'sözcük sonu' };
+  const soundTargetsCard = () => {
+    const targets = suggestSoundTargets(errorPairsFromResult(current)).slice(0, 5);
+    if (!targets.length) return null;
+    return h('div.card', null,
+      h('div.card-head', null, h('h3', null, icon('grid', 17), 'Önerilen hedef sesler'), h('span.sub', null, 'ses hatalarından çıkarıldı')),
+      h('div.card-body', null,
+        h('div.table-wrap', null, h('table.table', null,
+          h('thead', null, h('tr', null, h('th', null, 'Hedef ses'), h('th', null, 'Gözlem'), h('th', null, 'Örnek'), h('th', null, 'Materyal'))),
+          h('tbody', null, targets.map((t) => {
+            const sub = t.substitutes[0];
+            const qs = `ses=${encodeURIComponent(t.sound)}&pozisyon=${t.positions[0]}`;
+            return h('tr', null,
+              h('td', null, h('b', { style: { fontSize: '16px' } }, `/${t.sound}/`), h('div.tiny.muted', null, `${t.count} kez · ${t.positions.map((p) => POS_TR[p]).join(', ')}`)),
+              h('td.small', null, [sub ? `yerine /${t.substitutes.join('/, /')}/` : null, t.omissions ? `${t.omissions} kez düştü` : null].filter(Boolean).join(' · ')),
+              h('td.small.mono', null, t.examples.slice(0, 2).join(', ')),
+              h('td', null, h('span.row', { style: { gap: '6px' } },
+                h('a.btn.btn-soft.btn-sm', { href: `#/materyal?arac=set&${qs}` }, 'Sözcük kartları'),
+                sub ? h('a.btn.btn-ghost.btn-sm', { href: `#/materyal?arac=pairs&a=${encodeURIComponent(t.sound)}&b=${encodeURIComponent(sub)}` }, `/${t.sound}/ – /${sub}/ çiftleri`) : null)));
+          })))),
+        h('p.tiny.muted.mt-2', null, 'Öneriler, hedefi kodlanmış hatalardan ([: hedef]) ve bir harf uzağında bilinen sözcük bulunan üretimlerden çıkarılır. Otomatik transkript ses hatalarını gerçek sözcüğe düzeltmiş olabilir; transkripti dinleyerek doğrulayın. Hedef seçimi klinik karardır.')));
   };
 
   const voiceSummary = () => {
