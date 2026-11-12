@@ -766,3 +766,6 @@ table.table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .mat-media-item { border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: grid; gap: 8px; justify-items: center; }
 .mat-media-item .input { min-width: 0; height: 34px; }
 @media (max-width: 900px) { .mat-tool { grid-template-columns: minmax(0, 1fr); } }
+.stutter-btn { gap: 8px; min-height: 44px; padding: 0 14px; }
+.stutter-btn b { min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; background: var(--surface-3); border-radius: 8px; padding: 1px 6px; }
+.stutter-btn .kbd { font-size: 10px; }

@@ -9,6 +9,7 @@ import { MODULES, moduleOf, taskOf } from '../constants.js';
 import { openPatientForm } from '../components/patientForm.js';
 import { wordPill } from '../components/morphView.js';
 import { Recorder, LiveVad, listInputDevices } from '../../core/audio/recorder.js';
+import { LiveSyllableRate, rateBand } from '../../core/audio/liveRate.js';
 import { LiveTranscriber, sttCapabilities, onDeviceStatus, transcribeAudioBuffer, segmentsToTranscript, browserInfo } from '../../core/stt/webspeech.js';
 import { whisperTranscribe, WHISPER_MODELS, hasWebGPU, defaultWhisperModel } from '../../core/stt/whisper.js';
 import { analyzeTranscript } from '../../core/analysis.js';
@@ -233,6 +234,36 @@ export async function render(root, { query }, app) {
     const tKeyDown = (e) => { if ((e.key === 't' || e.key === 'T') && !e.repeat && !(e.target.closest && e.target.closest('input, textarea, select'))) { e.preventDefault(); tDown(); } };
     const tKeyUp = (e) => { if (e.key === 't' || e.key === 'T') tUp(); };
 
+    // Takılma sayacı: klinisyen duyduğu her takılmada düğmeye (ya da 1 / 2 / 3 tuşuna) basar
+    const STUTTER_TYPES = [{ id: 'rep', label: 'Tekrar', key: '1' }, { id: 'blk', label: 'Blok', key: '2' }, { id: 'pro', label: 'Uzatma', key: '3' }];
+    const stutterMarks = [];
+    const stutterOut = h('span.small.muted', null, 'Takılma işaretlenmedi');
+    const stutterBtns = STUTTER_TYPES.map((s) => {
+      const count = h('b', null, '0');
+      const b = h('button.btn.btn-ghost.stutter-btn', { type: 'button', disabled: true, title: `${s.label} (klavyede ${s.key})` }, s.label, count, h('span.kbd', null, s.key));
+      b.addEventListener('click', () => markStutter(s.id));
+      return { ...s, el: b, count };
+    });
+    const markStutter = (type) => {
+      if (!recorder || !recording || paused) return;
+      stutterMarks.push({ t: Number(recorder.elapsed.toFixed(2)), type });
+      for (const s of stutterBtns) s.count.textContent = String(stutterMarks.filter((m) => m.type === s.id).length);
+      const syl = rateMeter.total;
+      stutterOut.textContent = `${stutterMarks.length} takılma${syl >= 20 ? ` · yaklaşık %${num((100 * stutterMarks.length) / syl, 1)} (kestirim hece sayısıyla)` : ''}`;
+    };
+    const undoStutter = h('button.btn.btn-ghost.btn-sm', { type: 'button', disabled: true, title: 'Son işareti geri al' }, icon('x', 14), 'Geri al');
+    undoStutter.addEventListener('click', () => { const last = stutterMarks.pop(); if (last) { for (const s of stutterBtns) s.count.textContent = String(stutterMarks.filter((m) => m.type === s.id).length); stutterOut.textContent = stutterMarks.length ? `${stutterMarks.length} takılma` : 'Takılma işaretlenmedi'; } });
+    const sKey = (e) => {
+      if (e.repeat || (e.target.closest && e.target.closest('input, textarea, select'))) return;
+      const s = STUTTER_TYPES.find((x) => x.key === e.key);
+      if (s) { e.preventDefault(); markStutter(s.id); }
+    };
+    const rateMeter = new LiveSyllableRate();
+    const rateGroup = (() => {
+      const age = patient?.birthYear ? new Date().getFullYear() - Number(patient.birthYear) : null;
+      return age == null ? 'adult' : age < 13 ? 'child' : age >= 65 ? 'older' : 'adult';
+    })();
+
     // canlı ölçütler
     const mv = {};
     const metric = (key, label, value = '—', note = '') => {
@@ -241,7 +272,8 @@ export async function render(root, { query }, app) {
     };
     const liveMetrics = mod.transcript
       ? h('div.metric-grid', null, metric('utt', 'Sözce', '0'), metric('words', 'Sözcük', '0'), metric('mluw', 'MLU-w'), metric('mlum', 'MLU-m'),
-        metric('wpm', 'Sözcük/dk'), metric('long', 'Uzun duraksama', '0', '≥ 2 sn'), metric('fill', 'Dolgu'), metric('speak', 'Konuşma oranı'))
+        metric('wpm', 'Sözcük/dk'), metric('long', 'Uzun duraksama', '0', '≥ 2 sn'), metric('fill', 'Dolgu'), metric('speak', 'Konuşma oranı'),
+        metric('rate', 'Hız (son 5 sn)', '—', 'hece/sn · kestirim'), metric('f0', 'Anlık F0', '—', 'Hz'))
       : h('div.metric-grid', null, metric('phon', 'Şu anki fonasyon', '0,0 sn'), metric('best', 'En uzun fonasyon', '0,0 sn', 'MPT tahmini'),
         metric('f0', 'Anlık F0', '—', 'Hz'), metric('level', 'Ses düzeyi', '—', 'dBFS'));
 
@@ -352,17 +384,25 @@ export async function render(root, { query }, app) {
       if (recorder) timer.firstChild.textContent = clock(recorder.elapsed);
       drawOrb(recording && !paused ? lastDb : -90);
       const now = performance.now();
-      if (!mod.transcript && recorder && recording && !paused && now - lastPitchAt > 120) {
+      if (recorder && recording && !paused && now - lastPitchAt > (mod.transcript ? 300 : 120)) {
         lastPitchAt = now;
         const f0 = recorder.livePitch();
         mv.f0.textContent = f0 ? num(f0, 0) : '—';
-        mv.level.textContent = num(lastDb, 0);
+        if (mv.level) mv.level.textContent = num(lastDb, 0);
+        if (mv.rate) {
+          const r = rateMeter.rate(5);
+          const band = rateBand(r, rateGroup, state.taskType === 'reading' ? 'reading' : 'speech');
+          mv.rate.textContent = r == null ? '—' : num(r, 1);
+          mv.rate.style.color = band === 'slow' ? 'var(--info)' : band === 'fast' ? 'var(--warn)' : '';
+          mv.rate.title = band === 'slow' ? 'yavaş' : band === 'fast' ? 'hızlı' : 'beklenen aralıkta';
+        }
       }
     };
     raf = requestAnimationFrame(loop);
 
     const onLevel = (db) => {
       lastDb = db;
+      if (recording && !paused) rateMeter.push(db, 0.05);
       const r = vad.push(db, 0.05);
       levels.push({ db, speech: r.isSpeech });
       if (levels.length > 2000) levels.splice(0, 1000);
@@ -410,6 +450,8 @@ export async function render(root, { query }, app) {
       setState('rec');
       pauseBtn.disabled = false;
       tBtn.disabled = false;
+      for (const s of stutterBtns) s.el.disabled = false;
+      undoStutter.disabled = false;
       stopBtn.disabled = false;
       devSel.disabled = true;
       sttOn.disabled = true;
@@ -475,6 +517,7 @@ export async function render(root, { query }, app) {
         segments,
         markers,
         therapistIntervals,
+        liveStutter: stutterMarks,
         source: 'live',
         device: deviceLabel,
         recordedAt: new Date(Date.now() - rec.durationSec * 1000).toISOString(),
@@ -487,9 +530,10 @@ export async function render(root, { query }, app) {
       if (e.code === 'Space' && recorder) { e.preventDefault(); togglePause(); }
     };
     document.addEventListener('keydown', keyHandler);
-    if (mod.transcript) { document.addEventListener('keydown', tKeyDown); document.addEventListener('keyup', tKeyUp); }
+    if (mod.transcript) { document.addEventListener('keydown', tKeyDown); document.addEventListener('keyup', tKeyUp); document.addEventListener('keydown', sKey); }
     cleanupFn = () => {
       cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', sKey);
       document.removeEventListener('keydown', keyHandler);
       document.removeEventListener('keydown', tKeyDown);
       document.removeEventListener('keyup', tKeyUp);
@@ -524,7 +568,11 @@ export async function render(root, { query }, app) {
             h('div.live-center', null,
               h('div.mic-orb', null, orbCanvas, micBtn),
               h('div', null, timer, h('div.row.mt-2', null, pauseBtn, stopBtn, cancelBtn), silence,
-                mod.transcript ? h('div.row.mt-2', { style: { gap: '10px' } }, tBtn, tCount) : null)),
+                mod.transcript ? h('div.row.mt-2', { style: { gap: '10px' } }, tBtn, tCount) : null,
+                mod.transcript ? h('div.mt-2', null,
+                  h('div.tiny.muted', null, 'Takılma sayacı — duyduğunuz her takılmada basın'),
+                  h('div.row.mt-1', { style: { gap: '8px', flexWrap: 'wrap' } }, stutterBtns.map((s) => s.el), undoStutter),
+                  h('div.mt-1', null, stutterOut)) : null)),
             wave,
             sttNote),
           mod.transcript ? h('div.card', null,
@@ -627,7 +675,7 @@ export async function render(root, { query }, app) {
         patientId: state.patientId, module: state.module, taskType: state.taskType, taskDetail: state.taskDetail,
         source: p.source, blob: p.blob, fileName: p.fileName, audioInfo: p.audioInfo, acoustic, measures,
         transcriptText, engine, segments, markers: p.markers || [], device: p.device, recordedAt: p.recordedAt,
-        study, speakers, therapistIntervals: p.therapistIntervals || [],
+        study, speakers, therapistIntervals: p.therapistIntervals || [], liveStutter: p.liveStutter || [],
         onUploadProgress: app.backend.isCloud ? (v) => progress(0.93 + 0.06 * v, `Ses kaydı buluta yükleniyor… %${Math.round(v * 100)}`) : null,
       });
       progress(1, 'Tamamlandı');

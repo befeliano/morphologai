@@ -118,6 +118,8 @@ export async function saveSession(app, p) {
     markers: p.markers || [],
     notes: p.notes || '',
     device: p.device || null,
+    // Canlı seansta klinisyenin düğmeyle işaretlediği takılmalar: [{t, type: "rep"|"blk"|"pro"}]
+    liveStutter: p.liveStutter?.length ? p.liveStutter.slice(0, 2000) : null,
   };
   let session = await app.repo.sessions.save(base);
   if (p.blob) {

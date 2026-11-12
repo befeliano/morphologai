@@ -115,6 +115,8 @@ export async function runAll() {
   await studyTests(results);
   await materialTests(results);
   await bridgeTests(results);
+  await liveToolTests(results);
+  await targetTests(results);
   return results;
 }
 
@@ -321,4 +323,34 @@ export async function bridgeTests(results) {
   const r = analyzeSession({ transcript: 'tedi [: kedi] süt içti.\nT: tuş [: kuş] mu?', final: true });
   const pairs = errorPairsFromResult(r);
   add('köprü: transkriptten çiftler (terapist hariç)', 'tedi→kedi', pairs.map((p) => `${p.word}→${p.target}`).join(','), pairs.length === 1 && pairs[0].target === 'kedi' && pairs[0].coded);
+}
+
+// Canlı araçlar: hece hızı kestirimi
+export async function liveToolTests(results) {
+  const { LiveSyllableRate, rateBand } = await import('../js/core/audio/liveRate.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'canlı', input, expected, got: String(got), ok: !!ok });
+  // 4 hece/sn: 250 ms'de bir tepe (50 ms adım): düzey -20 ↔ -40 dB arasında gidip gelir
+  const m = new LiveSyllableRate();
+  for (let i = 0; i < 200; i++) m.push(i % 5 === 0 ? -20 : i % 5 === 1 || i % 5 === 4 ? -28 : -40, 0.05);
+  const r = m.rate(5);
+  add('canlı hız: 4 hece/sn sinyal', '3,5–4,5 hece/sn', r?.toFixed(2), r > 3.5 && r < 4.5);
+  const quiet = new LiveSyllableRate();
+  for (let i = 0; i < 200; i++) quiet.push(-62 + (i % 2), 0.05);
+  add('canlı hız: sessizlikte hece sayılmaz', '0', quiet.rate(5), quiet.rate(5) === 0);
+  add('hız bandı', 'yavaş / normal / hızlı', [rateBand(2, 'adult'), rateBand(4.5, 'adult'), rateBand(7, 'adult')].join(','), rateBand(2, 'adult') === 'slow' && rateBand(4.5, 'adult') === 'normal' && rateBand(7, 'adult') === 'fast');
+}
+
+// Hedef sayacı
+export async function targetTests(results) {
+  const { countTargets } = await import('../js/core/materials/targets.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'materyal', input, expected, got: String(got), ok: !!ok });
+  const r = analyzeSession({ transcript: 'Çocuklar parkta oynuyor.\nKalar diye bir şey yok.\nArabalar yolda gidiyor.\nT: Kuşlar nerede?', final: true });
+  const pl = countTargets(r, { type: 'suffix', value: 'PL' });
+  add('hedef: çokluk eki (terapist hariç, "kalar" sayılmaz)', '2: çocuklar, arabalar', `${pl.count}: ${pl.words.map((w) => w.word).join(', ')}`, pl.count === 2 && pl.words.every((w) => ['çocuklar', 'arabalar'].includes(w.word)));
+  const snd = countTargets(r, { type: 'sound', value: 'r', position: 'final' });
+  add('hedef: /r/ sözcük sonu', 'çocuklar, oynuyor, kalar, bir, arabalar, gidiyor', snd.count, snd.count === 6);
+  const prog = countTargets(r, { type: 'suffix', value: 'PROG' });
+  add('hedef: şimdiki zaman', '2 (oynuyor, gidiyor)', prog.count, prog.count === 2 && prog.uttWithHit === 2);
+  const w = countTargets(r, { type: 'word', value: 'araba' });
+  add('hedef: sözcük (kökten)', '1', w.count, w.count === 1);
 }

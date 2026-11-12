@@ -23,6 +23,7 @@ import { transcribeAudioBuffer, segmentsToTranscript, sttCapabilities } from '..
 import { whisperTranscribe, WHISPER_MODELS, hasWebGPU, defaultWhisperModel } from '../../core/stt/whisper.js';
 import { decodeToMono16k } from '../../core/audio/decode.js';
 import { suggestSoundTargets, errorPairsFromResult } from '../../core/materials/bridge.js';
+import { countTargets, SUFFIX_TARGETS } from '../../core/materials/targets.js';
 
 export async function render(root, { params, query }, app) {
   let session = await app.repo.sessions.get(params.id);
@@ -174,7 +175,7 @@ export async function render(root, { params, query }, app) {
     if (lab && tab !== 'lab') { /* laboratuvar ayrı tutulur */ }
     if (tab === 'summary') mount(panel, summaryPanel());
     else if (tab === 'transcript') mount(panel, transcriptPanel());
-    else if (tab === 'stutter') mount(panel, stutteringCard(current?.stuttering, current?.fluency));
+    else if (tab === 'stutter') mount(panel, liveStutterCard(), stutteringCard(current?.stuttering, current?.fluency));
     else if (tab === 'morph') mount(panel, morphPanel());
     else if (tab === 'lab') {
       if (!lab) {
@@ -244,7 +245,59 @@ export async function render(root, { params, query }, app) {
           const cand = L.errors.phonologicalCandidates.find((c) => c.word === w);
           return badge(cand ? `${w} → ${cand.target}?` : w, cand ? 'warn' : 'danger');
         })), h('p.tiny.muted.mt-2', null, 'Parafazi olduğunu düşündüklerinizi transkriptte [* p] / [* n] ile kodlayın; hedef sözcüğü [: hedef] ile ekleyin.'))) : null,
-      soundTargetsCard());
+      soundTargetsCard(),
+      targetCounterCard(),
+      session.module === 'fluency' ? null : liveStutterCard());
+  };
+
+  // Hedef sayacı: bir sesin, ekin ya da sözcüğün danışan sözcelerinde kaç kez geçtiği
+  const targetCounterCard = () => {
+    if (!current) return null;
+    const type = select([{ id: 'sound', label: 'Ses' }, { id: 'suffix', label: 'Ek (biçimbirim)' }, { id: 'word', label: 'Sözcük' }], 'sound');
+    const value = h('input.input', { placeholder: 'ör. r', maxlength: 30, style: { maxWidth: '180px' } });
+    const suffix = select(SUFFIX_TARGETS, 'PL');
+    const position = select([{ id: '', label: 'Her konum' }, { id: 'initial', label: 'Sözcük başı' }, { id: 'medial', label: 'Sözcük ortası' }, { id: 'final', label: 'Sözcük sonu' }], '');
+    const out = h('div.mt-2');
+    const run = () => {
+      suffix.style.display = type.value === 'suffix' ? '' : 'none';
+      value.style.display = type.value === 'suffix' ? 'none' : '';
+      position.style.display = type.value === 'sound' ? '' : 'none';
+      value.placeholder = type.value === 'word' ? 'ör. araba' : 'ör. r';
+      const t = { type: type.value, value: type.value === 'suffix' ? suffix.value : value.value, position: position.value || null };
+      if (!t.value) { mount(out, h('p.small.muted', null, 'Bir hedef girin; danışanın sözcelerinde kaç kez geçtiği sayılır.')); return; }
+      const r = countTargets(current, t);
+      mount(out,
+        h('div.metric-grid', null,
+          h('div.metric.hero', null, h('div.m-label', null, 'Hedef sayısı'), h('div.m-value', null, String(r.count)), h('div.m-note', null, `${r.uttWithHit} / ${r.utterances} sözcede`)),
+          h('div.metric', null, h('div.m-label', null, 'Farklı sözcük'), h('div.m-value', null, String(r.words.length)))),
+        r.words.length ? h('div.row.mt-2', { style: { gap: '6px' } }, r.words.slice(0, 40).map((w) => badge(`${w.word}${w.n > 1 ? ` ×${w.n}` : ''}`, 'info'))) : h('p.small.muted.mt-2', null, 'Bu hedef danışanın sözcelerinde geçmiyor.'));
+    };
+    for (const el of [type, suffix, position]) el.addEventListener('change', run);
+    value.addEventListener('input', debounce(run, 200));
+    run();
+    return h('div.card', null,
+      h('div.card-head', null, h('h3', null, icon('target', 17), 'Hedef sayacı'), h('span.sub', null, 'ses, ek ya da sözcük')),
+      h('div.card-body', null,
+        h('div.row', { style: { gap: '10px', flexWrap: 'wrap', alignItems: 'center' } }, h('div', { style: { minWidth: '170px' } }, type), value, h('div', { style: { minWidth: '230px' } }, suffix), h('div', { style: { minWidth: '160px' } }, position)),
+        out,
+        h('p.tiny.muted.mt-2', null, 'Ekler düz metinle değil biçimbirim çözümlemesiyle bulunur (ör. çokluk eki yalnız gerçekten çokluk eki olduğunda sayılır). Sayım hedefin geçtiği yerleri gösterir; üretimin doğru olup olmadığını transkripti dinleyerek değerlendirin.')));
+  };
+
+  // Canlı seansta düğmeyle işaretlenen takılmalar: şiddet = takılma ÷ hece × 100 (hece sayısı transkriptten)
+  const liveStutterCard = () => {
+    const marks = session.liveStutter;
+    if (!marks?.length) return null;
+    const n = (t) => marks.filter((m) => m.type === t).length;
+    const syl = current?.language?.words?.syllables || current?.stuttering?.syllables || 0;
+    const ss = syl ? (100 * marks.length) / syl : null;
+    return h('div.card', { style: { marginBottom: '16px' } },
+      h('div.card-head', null, h('h2', null, icon('flag', 18), 'Canlı takılma sayımı'), h('span.sub', null, 'kayıt sırasında klinisyenin işaretledikleri')),
+      h('div.card-body', null, h('div.metric-grid', null,
+        h('div.metric.hero', null, h('div.m-label', null, 'Kekemelik şiddeti'), h('div.m-value', null, ss == null ? '—' : `%${num(ss, 1)}`), h('div.m-note', null, syl ? `${marks.length} takılma ÷ ${syl} hece` : 'hece sayısı için transkript gerekli')),
+        h('div.metric', null, h('div.m-label', null, 'Tekrar'), h('div.m-value', null, String(n('rep')))),
+        h('div.metric', null, h('div.m-label', null, 'Blok'), h('div.m-value', null, String(n('blk')))),
+        h('div.metric', null, h('div.m-label', null, 'Uzatma'), h('div.m-value', null, String(n('pro'))))),
+      h('p.tiny.muted.mt-2', null, `İşaret zamanları: ${marks.slice(0, 40).map((m) => clock(m.t)).join(', ')}${marks.length > 40 ? ' …' : ''}. Bu sayım klinisyenin kulağına dayanır; transkript kodlarından hesaplanan çözümleme ayrıca verilir. İkisi farklıysa transkript kodlamasını gözden geçirin.`)));
   };
 
   // Analizden materyale köprü: ses hatalarından hedef ses önerisi ve o filtreyle Materyal Atölyesi
