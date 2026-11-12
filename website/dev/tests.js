@@ -117,7 +117,38 @@ export async function runAll() {
   await bridgeTests(results);
   await liveToolTests(results);
   await targetTests(results);
+  await planTests(results);
   return results;
+}
+
+// Terapi planı: hedef önerileri, ev kayıtları özeti, üreticiler (sohbet, hikâye, IPA alıştırması)
+async function planTests(results) {
+  const { suggestGoals, sessionPlanDraft, homeSummary } = await import('../js/core/plan/goals.js');
+  const G = await import('../js/core/materials/generators.js');
+  const B = await import('../js/core/materials/wordbank.js');
+  const add = (input, expected, got, ok) => results.push({ kind: 'plan', input, expected, got: String(got), ok: !!ok });
+  const r = analyzeSession({ transcript: 'tedi [: kedi] süt içti.\ntuş [: kuş] uçtu.\naaba geldi.', final: true });
+  const goals = suggestGoals({ result: r });
+  add('hedef önerisi: kodlanmış hatalardan', '/k/ sözcük başında, süre ve ölçüt içerir', goals[0]?.short, goals[0]?.area === 'articulation' && /\/k\/ sesini sözcük başında/.test(goals[0].short) && /6 hafta/.test(goals[0].short) && /10 denemenin 8/.test(goals[0].short) && !goals.some((g) => /\/b\//.test(g.short)));
+  const none = suggestGoals({ result: null });
+  add('hedef önerisi: veri yoksa genel kalıp', 'general', none[0].area, none.length === 1 && none[0].area === 'general');
+  const draft = sessionPlanDraft(goals, 40);
+  add('seans planı taslağı', '5 bölüm, toplam 40 dk', draft.reduce((s, x) => s + x.min, 0), draft.length === 5 && draft.reduce((s, x) => s + x.min, 0) === 40);
+  const today = new Date(2026, 10, 12);
+  const hs = homeSummary([{ day: '2026-11-12', done: true }, { day: '2026-11-11', done: true }, { day: '2026-11-10', done: false }, { day: '2026-11-09', done: true }], today);
+  add('ev kayıtları: seri ve haftalık yüzde', 'seri 2, %43', `${hs.streak}, %${hs.weekPct}`, hs.streak === 2 && hs.weekPct === 43 && hs.days.length === 7 && hs.days[6].done === true && hs.days[4].done === false);
+  const hs2 = homeSummary([{ day: '2026-11-11', done: true }], today);
+  add('ev kayıtları: bugün girilmemişse seri bozulmaz', 'seri 1', hs2.streak, hs2.streak === 1);
+
+  const chat = G.chatCards({ topics: ['yemek'], level: 1, count: 5, seed: 2 });
+  add('sohbet kartları: konu ve düzey', 'yemek, düzey 1', chat.length, chat.length > 0 && chat.every((c) => c.topic === 'yemek' && c.level === 1));
+  const st = G.templateStory(['kedi', 'top', 'araba'], { hero: 'Ela', seed: 3 });
+  add('hikâye: hedef sözcükler ve kahraman geçer', 'kedi, top, araba, Ela', st.text.slice(0, 60), ['kedi', 'top', 'araba', 'Ela'].every((w) => st.text.includes(w)) && st.questions.length >= 4);
+  const bank = B.buildBank();
+  const q = G.ipaQuiz(bank, { mode: 'toipa', level: 1, count: 6, seed: 4 });
+  add('IPA alıştırması: 4 seçenek, doğru yanıt seçeneklerde', '6 soru', q.length, q.length === 6 && q.every((x) => x.options.length === 4 && x.answer >= 0 && new Set(x.options).size === 4));
+  const qs = G.ipaQuiz(bank, { mode: 'symbol', count: 5, seed: 1 });
+  add('IPA alıştırması: simge modu', '5 soru', qs.length, qs.length === 5 && qs.every((x) => x.answer >= 0));
 }
 
 // ---------------------------------------------------------------------------

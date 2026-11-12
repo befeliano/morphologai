@@ -1,0 +1,37 @@
+/* Ev Programı — danışan / aile ekranı (uygulamadan bağımsız, küçük ve mobil öncelikli) */
+:root { --bg: #f5f6fb; --surface: #fff; --ink: #1e2233; --muted: #646b85; --line: #dfe2ee; --pri: #5b54d6; --pri-soft: #ecebfb; --ok: #0f8a5f; --ok-soft: #e2f5ee; --no: #b4501e; --no-soft: #fbeee6; }
+@media (prefers-color-scheme: dark) { :root { --bg: #11131c; --surface: #1a1d2a; --ink: #e8eaf4; --muted: #9ca3bd; --line: #2c3146; --pri: #a5a0ff; --pri-soft: #272551; --ok: #55d3a4; --ok-soft: #123a2e; --no: #f0a26f; --no-soft: #3d2616; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+main { max-width: 560px; margin: 0 auto; padding: 18px 16px 48px; display: grid; gap: 14px; }
+h1 { font-size: 22px; margin: 4px 0 0; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+.t-muted { color: var(--muted); font-size: 14px; }
+.t-center { text-align: center; }
+.t-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+.t-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.t-btn { flex: 1 1 130px; min-height: 52px; border-radius: 14px; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.t-btn:focus-visible { outline: 3px solid var(--pri); outline-offset: 2px; }
+.t-btn.yes.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.t-btn.no.on { background: var(--no-soft); border-color: var(--no); color: var(--no); }
+.t-chip { min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.t-chip.on { background: var(--pri-soft); border-color: var(--pri); color: var(--pri); font-weight: 600; }
+textarea { width: 100%; min-height: 76px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
+.t-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.t-day { text-align: center; font-size: 12px; color: var(--muted); }
+.t-day span { display: grid; place-items: center; aspect-ratio: 1; border-radius: 12px; border: 1.5px solid var(--line); margin-bottom: 4px; font-size: 16px; font-weight: 700; color: var(--muted); }
+.t-day.done span { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.t-day.miss span { background: var(--no-soft); border-color: var(--no); color: var(--no); }
+.t-day.today { color: var(--ink); font-weight: 600; }
+.t-stats { display: flex; gap: 18px; margin-top: 10px; font-size: 14px; }
+.t-stats b { font-size: 20px; display: block; }
+ul.t-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+ul.t-list li { border-top: 1px solid var(--line); padding-top: 10px; }
+ul.t-list li:first-child { border-top: 0; padding-top: 0; }
+.t-sub { color: var(--muted); font-size: 14px; white-space: pre-wrap; }
+.t-save { font-size: 13px; color: var(--muted); min-height: 20px; }
+.t-save.ok { color: var(--ok); }
+.t-save.err { color: var(--no); }
+details summary { cursor: pointer; font-weight: 600; }
+
+[hidden] { display: none !important; }

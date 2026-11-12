@@ -21,7 +21,7 @@ export async function render(root, { params }, app) {
     const rows = sessions.filter((s) => s.analysis).map((s) => ({ session: s, patient: p, a: s.analysis }));
     download(new Blob([sessionsCsv(rows)], { type: 'text/csv;charset=utf-8' }), `MorphologAI_${safeName(p.code)}_seanslar.csv`);
   });
-  app.setActions([csvBtn, editBtn, h('a.btn.btn-primary.btn-sm', { href: `#/seans/yeni?patient=${p.id}` }, icon('plus', 15), 'Yeni seans')]);
+  app.setActions([csvBtn, editBtn, h('a.btn.btn-soft.btn-sm', { href: `#/danisan/${p.id}/plan` }, icon('note', 15), 'Terapi planı'), h('a.btn.btn-primary.btn-sm', { href: `#/seans/yeni?patient=${p.id}` }, icon('plus', 15), 'Yeni seans')]);
 
   const age = p.birthYear ? new Date().getFullYear() - p.birthYear : null;
   const monthsPost = p.onsetDate ? ((Date.now() - new Date(p.onsetDate)) / 2629800000) : null;

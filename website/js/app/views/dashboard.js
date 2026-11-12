@@ -82,6 +82,18 @@ export async function render(root, _p, app) {
   }
 
   const pctUsed = storage.quota ? (100 * storage.usage) / storage.quota : 0;
+
+  // Haftalık seans planı: danışanların terapi planındaki günler (bugünden başlayarak)
+  const DAYS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+  const todayIdx = (now.getDay() + 6) % 7;
+  const slots = patients.flatMap((p) => (p.plan?.schedule || []).map((s) => ({ p, day: s.day, time: s.time || '' })))
+    .sort((a, b) => ((a.day - todayIdx + 7) % 7) - ((b.day - todayIdx + 7) % 7) || a.time.localeCompare(b.time));
+  if (slots.length) {
+    callouts.push(h('div.card', null,
+      h('div.card-head', null, h('h3', null, icon('calendar', 17), 'Haftalık seans planı'), h('span.sub', null, `${slots.length} planlı seans`)),
+      h('div.card-body', null, h('div.row', { style: { gap: '8px' } }, slots.slice(0, 24).map((s) => h('a.badge.outline', { href: `#/danisan/${s.p.id}/plan`, style: { textDecoration: 'none', padding: '6px 10px' } },
+        h('b', null, s.day === todayIdx ? 'Bugün' : DAYS[s.day]), ` ${s.time} · ${s.p.code}`))))));
+  }
   mount(root,
     h('div.page-head', null,
       h('div', null,

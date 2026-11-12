@@ -578,6 +578,127 @@ create policy morphologai_recordings_delete on storage.objects for delete to aut
          and (storage.foldername(name))[1] in (select o::text from public.my_orgs(2) as o));
 
 -- -----------------------------------------------------------------------------
+-- 9) Ev programı: şifresiz danışan bağlantısı ve günlük kayıtlar
+--    Danışan / aile tarafı oturum açmaz (anon). Tablolara anon erişimi YOKTUR; yalnızca iki
+--    "security definer" işlev çağrılabilir: link_get ve link_log. Bağlantı anahtarı 128 bit
+--    rastgeledir; veritabanında yalnızca SHA-256 özeti tutulur. İşlevler ad, tanı, seans ya da
+--    ses verisi döndürmez; yalnızca klinisyenin paylaşmak üzere yazdığı ev programını döndürür.
+-- -----------------------------------------------------------------------------
+create table if not exists public.patient_links (
+  id          uuid primary key default gen_random_uuid(),
+  org_id      uuid not null references public.orgs (id) on delete cascade,
+  patient_id  uuid not null,
+  token_hash  text not null unique check (token_hash ~ '^[0-9a-f]{64}$'),
+  expires_at  timestamptz not null,
+  revoked_at  timestamptz,
+  hits        integer not null default 0,
+  hits_window timestamptz not null default now(),
+  last_seen_at timestamptz,
+  created_by  uuid references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  constraint patient_links_patient_fk foreign key (org_id, patient_id)
+    references public.patients (org_id, id) on delete cascade
+);
+create index if not exists patient_links_patient_idx on public.patient_links (patient_id);
+
+create table if not exists public.home_logs (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null,
+  patient_id uuid not null,
+  day        date not null,
+  done       boolean not null,
+  slot       text not null default '' check (slot in ('', 'sabah', 'ogle', 'aksam')),
+  note       text not null default '' check (char_length(note) <= 500),
+  updated_at timestamptz not null default now(),
+  constraint home_logs_patient_day_key unique (patient_id, day),
+  constraint home_logs_patient_fk foreign key (org_id, patient_id)
+    references public.patients (org_id, id) on delete cascade
+);
+
+drop trigger if exists stamp on public.patient_links;
+create trigger stamp before insert or update on public.patient_links for each row execute function public.tg_stamp();
+
+alter table public.patient_links enable row level security;
+alter table public.home_logs     enable row level security;
+drop policy if exists patient_links_select on public.patient_links;
+create policy patient_links_select on public.patient_links for select to authenticated using (org_id in (select public.my_orgs(1)));
+drop policy if exists patient_links_insert on public.patient_links;
+create policy patient_links_insert on public.patient_links for insert to authenticated with check (org_id in (select public.my_orgs(2)));
+drop policy if exists patient_links_update on public.patient_links;
+create policy patient_links_update on public.patient_links for update to authenticated
+  using (org_id in (select public.my_orgs(2))) with check (org_id in (select public.my_orgs(2)));
+drop policy if exists patient_links_delete on public.patient_links;
+create policy patient_links_delete on public.patient_links for delete to authenticated using (org_id in (select public.my_orgs(2)));
+drop policy if exists home_logs_select on public.home_logs;
+create policy home_logs_select on public.home_logs for select to authenticated using (org_id in (select public.my_orgs(1)));
+drop policy if exists home_logs_delete on public.home_logs;
+create policy home_logs_delete on public.home_logs for delete to authenticated using (org_id in (select public.my_orgs(2)));
+
+revoke all on public.patient_links, public.home_logs from anon, authenticated;
+grant select, insert, delete on public.patient_links to authenticated;
+grant update (revoked_at) on public.patient_links to authenticated;   -- yalnız iptal edilebilir
+grant select, delete on public.home_logs to authenticated;            -- kayıtları yalnız link_log yazar
+
+-- Anahtarı çözer; geçersiz, süresi dolmuş ya da iptal edilmişse NULL. Bağlantı başına saatte 240 istek.
+create or replace function public.link_resolve(p_token text)
+returns public.patient_links language plpgsql security definer set search_path = public, pg_temp as $$
+declare l public.patient_links;
+begin
+  if p_token is null or p_token !~ '^[0-9a-f]{32,64}$' then return null; end if;
+  select * into l from public.patient_links
+   where token_hash = encode(sha256(convert_to(p_token, 'UTF8')), 'hex');
+  if not found or l.revoked_at is not null or l.expires_at < now() then return null; end if;
+  if l.hits_window < now() - interval '1 hour' then
+    update public.patient_links set hits = 1, hits_window = now(), last_seen_at = now() where id = l.id;
+  elsif l.hits >= 240 then
+    raise exception 'Çok fazla istek. Bir süre sonra yeniden deneyin.' using errcode = '54000';
+  else
+    update public.patient_links set hits = hits + 1, last_seen_at = now() where id = l.id;
+  end if;
+  return l;
+end $$;
+
+-- Danışan ekranının okuduğu veri: paylaşılan ev programı ve son 14 günün kayıtları
+create or replace function public.link_get(p_token text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare l public.patient_links; v_home jsonb;
+begin
+  l := public.link_resolve(p_token);
+  if l.id is null then return null; end if;
+  select coalesce(p.data -> 'plan' -> 'home', '{}'::jsonb) into v_home from public.patients p where p.id = l.patient_id;
+  return jsonb_build_object(
+    'home', coalesce(v_home, '{}'::jsonb),
+    'expiresAt', l.expires_at,
+    'today', current_date,
+    'logs', (select coalesce(jsonb_agg(jsonb_build_object('day', h.day, 'done', h.done, 'slot', h.slot, 'note', h.note) order by h.day desc), '[]'::jsonb)
+               from public.home_logs h where h.patient_id = l.patient_id and h.day >= current_date - 13));
+end $$;
+
+-- Günlük kayıt: yalnız bugün ve dün (saat dilimi payıyla yarın) yazılabilir
+create or replace function public.link_log(p_token text, p_day date, p_done boolean, p_slot text default '', p_note text default '')
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+declare l public.patient_links;
+begin
+  l := public.link_resolve(p_token);
+  if l.id is null then return false; end if;
+  if p_day is null or p_done is null or p_day < current_date - 1 or p_day > current_date + 1 then
+    raise exception 'Yalnızca bugün ve dün için kayıt girilebilir.' using errcode = '22023';
+  end if;
+  if coalesce(p_slot, '') not in ('', 'sabah', 'ogle', 'aksam') then
+    raise exception 'Geçersiz zaman dilimi.' using errcode = '22023';
+  end if;
+  insert into public.home_logs (org_id, patient_id, day, done, slot, note)
+  values (l.org_id, l.patient_id, p_day, p_done, coalesce(p_slot, ''), left(coalesce(p_note, ''), 500))
+  on conflict (patient_id, day) do update
+    set done = excluded.done, slot = excluded.slot, note = excluded.note, updated_at = now();
+  return true;
+end $$;
+
+revoke execute on function public.link_resolve(text), public.link_get(text), public.link_log(text, date, boolean, text, text) from public, anon, authenticated;
+grant usage on schema public to anon;
+grant execute on function public.link_get(text), public.link_log(text, date, boolean, text, text) to anon, authenticated;
+
+-- -----------------------------------------------------------------------------
 -- 8) Görsel deposu: gizli "media" kovası; yol <org_id>/<görsel_id>.<uzantı>
 --    (yalnız PNG/JPEG/WebP, dosya başına 5 MB)
 -- -----------------------------------------------------------------------------

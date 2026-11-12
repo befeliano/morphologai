@@ -502,9 +502,45 @@ export function createCloudRepo(ctx) {
     },
   };
 
+  // -------------------------------------------------------------------------
+  // Ev programı: şifresiz danışan bağlantıları ve günlük kayıtlar
+  // Anahtar yalnızca oluşturulurken bir kez döner; veritabanında SHA-256 özeti tutulur.
+  // -------------------------------------------------------------------------
+  const sha256Hex = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const linkFromRow = (r) => ({ id: r.id, patientId: r.patient_id, expiresAt: r.expires_at, revokedAt: r.revoked_at, lastSeenAt: r.last_seen_at, createdAt: r.created_at });
+  const links = {
+    supported: true,
+    /** @returns {{token: string, link: object}} token yalnız burada görünür */
+    async create(patientId, days = 180) {
+      ensure('patient.write');
+      const token = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const d = Math.max(1, Math.min(366, Number(days) || 180));
+      const row = check(await sb.from('patient_links').insert({
+        org_id: orgId, patient_id: patientId, token_hash: await sha256Hex(token), expires_at: new Date(Date.now() + d * 86400000).toISOString(),
+      }).select('id,patient_id,expires_at,revoked_at,last_seen_at,created_at').single(), 'Bağlantı oluşturulamadı.');
+      await audit(orgId, userId, 'link.create', { patientId });
+      return { token, link: linkFromRow(row) };
+    },
+    async list(patientId) {
+      const rows = check(await sb.from('patient_links').select('id,patient_id,expires_at,revoked_at,last_seen_at,created_at').eq('org_id', orgId).eq('patient_id', patientId).order('created_at', { ascending: false })) || [];
+      return rows.map(linkFromRow);
+    },
+    async revoke(id) {
+      ensure('patient.write');
+      const data = check(await sb.from('patient_links').update({ revoked_at: now() }).eq('id', id).eq('org_id', orgId).select('id'), 'Bağlantı iptal edilemedi.');
+      if (!data?.length) throw new Error('Bağlantı iptal edilemedi (yetkiniz olmayabilir).');
+      await audit(orgId, userId, 'link.revoke', { id });
+    },
+    async logs(patientId, limit = 60) {
+      const rows = check(await sb.from('home_logs').select('day,done,slot,note,updated_at').eq('org_id', orgId).eq('patient_id', patientId).order('day', { ascending: false }).limit(limit)) || [];
+      return rows.map((r) => ({ day: String(r.day).slice(0, 10), done: r.done, slot: r.slot, note: r.note, updatedAt: r.updated_at }));
+    },
+  };
+
   return {
     kind: 'cloud',
     ctx,
+    links,
     patients,
     sessions,
     audio,

@@ -1,0 +1,10 @@
+{
+  "name": "Ev Programı",
+  "short_name": "Ev Programı",
+  "start_url": "takip.html",
+  "display": "standalone",
+  "background_color": "#f5f6fb",
+  "theme_color": "#6366f1",
+  "lang": "tr",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

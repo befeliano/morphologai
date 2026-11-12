@@ -18,6 +18,7 @@ const ROUTES = [
   { path: '/', load: () => import('./views/dashboard.js'), nav: 'dashboard' },
   { path: '/danisanlar', load: () => import('./views/patients.js'), nav: 'patients' },
   { path: '/danisan/:id', load: () => import('./views/patient.js'), nav: 'patients' },
+  { path: '/danisan/:id/plan', load: () => import('./views/plan.js'), nav: 'patients' },
   { path: '/seans/yeni', load: () => import('./views/newSession.js'), nav: 'new' },
   { path: '/seans/:id', load: () => import('./views/session.js'), nav: 'sessions' },
   { path: '/seanslar', load: () => import('./views/sessions.js'), nav: 'sessions' },

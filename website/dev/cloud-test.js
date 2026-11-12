@@ -284,6 +284,88 @@ async function main() {
   await repoA.words.remove(w1.id);
   check('Materyal ve sözcük silinir', (await repoA.materials.list()).length === 0 && (await repoA.words.list()).length === 0);
 
+  // 19) Ev programı: şifresiz danışan bağlantısı (anon yalnız iki işlevi çağırabilir)
+  {
+  const pL = await repoA.patients.save({ code: 'L-1', fullName: 'Gizli Ad Soyad', diagnosis: 'kekemelik', plan: { goals: [{ short: 'gizli hedef' }], home: { tasks: [{ title: 'r kartları', freq: 'günde 2 kez' }], homework: [], advice: ['Yavaş konuşun'], note: 'Paylaşılan not' } } });
+  const { token, link } = await repoA.links.create(pL.id, 30);
+  check('Bağlantı oluşturulur; anahtar 128 bit, veritabanında yalnız özeti durur', /^[0-9a-f]{32}$/.test(token)
+    && (await pg.query('select token_hash from patient_links where id = $1', [link.id])).rows[0].token_hash !== token);
+  const today = (await pg.query('select current_date::text as d')).rows[0].d;
+  const dayOff = async (n) => (await pg.query(`select (current_date + ${Number(n)})::text as d`)).rows[0].d;
+
+  await auth.logout(); // bundan sonrası oturumsuz (anon) — danışanın cihazı
+  const g1 = await sb.rpc('link_get', { p_token: token });
+  const g1s = JSON.stringify(g1.data || {});
+  check('Anon: geçerli anahtarla ev programı okunur', g1.data?.home?.tasks?.[0]?.title === 'r kartları' && g1.data.home.note === 'Paylaşılan not', g1.error?.message);
+  check('Anon: ad, tanı, kod ve hedefler dönmez', !/Gizli Ad|kekemelik|L-1|gizli hedef/.test(g1s), g1s.slice(0, 200));
+  const gBad = await sb.rpc('link_get', { p_token: 'f'.repeat(32) });
+  const gInj = await sb.rpc('link_get', { p_token: "' or 1=1 --" });
+  check('Anon: yanlış ya da bozuk anahtar hiçbir şey döndürmez', gBad.data === null && !gBad.error && gInj.data === null);
+  const aP = await sb.from('patients').select('*');
+  const aL = await sb.from('patient_links').select('*');
+  const aH = await sb.from('home_logs').select('*');
+  const aI = await sb.from('home_logs').insert({ org_id: orgA, patient_id: pL.id, day: today, done: true }).select('id');
+  check('Anon: tablolara doğrudan erişim yok', (!!aP.error || !aP.data?.length) && (!!aL.error || !aL.data?.length) && (!!aH.error || !aH.data?.length) && !!aI.error, [aP.error?.message, aI.error?.message].join(' | '));
+  const lg1 = await sb.rpc('link_log', { p_token: token, p_day: today, p_done: true, p_slot: 'aksam', p_note: 'x'.repeat(700) });
+  const row1 = (await pg.query('select done, slot, char_length(note) as n from home_logs where patient_id = $1', [pL.id])).rows[0];
+  check('Anon: günlük kayıt yazılır; not 500 karaktere kırpılır', lg1.data === true && row1?.done === true && row1.slot === 'aksam' && row1.n === 500, lg1.error?.message);
+  const lg2 = await sb.rpc('link_log', { p_token: token, p_day: today, p_done: false, p_slot: '', p_note: 'yorgundu' });
+  const cnt = (await pg.query('select count(*)::int as n from home_logs where patient_id = $1', [pL.id])).rows[0].n;
+  check('Anon: aynı gün yeniden yazılınca tek kayıt kalır', lg2.data === true && cnt === 1);
+  const lgOld = await sb.rpc('link_log', { p_token: token, p_day: await dayOff(-10), p_done: true, p_slot: '', p_note: '' });
+  const lgSlot = await sb.rpc('link_log', { p_token: token, p_day: today, p_done: true, p_slot: 'gece', p_note: '' });
+  check('Anon: eski tarih ve geçersiz zaman dilimi reddedilir', !!lgOld.error && !!lgSlot.error, `${lgOld.error?.message} | ${lgSlot.error?.message}`);
+  const lgBad = await sb.rpc('link_log', { p_token: 'a'.repeat(32), p_day: today, p_done: true, p_slot: '', p_note: '' });
+  check('Anon: yanlış anahtarla kayıt yazılamaz', lgBad.data === false && cnt === (await pg.query('select count(*)::int as n from home_logs')).rows[0].n);
+  const res1 = await sb.rpc('link_resolve', { p_token: token });
+  check('Anon: iç işlev (link_resolve) çağrılamaz', !!res1.error, res1.error?.message);
+  await pg.query('update patient_links set hits = 240 where id = $1', [link.id]);
+  const gLim = await sb.rpc('link_get', { p_token: token });
+  check('İstek sınırı: saatte 240 istekten sonrası reddedilir', !!gLim.error && /Çok fazla/.test(gLim.error.message), gLim.error?.message);
+  await pg.query('update patient_links set hits = 0 where id = $1', [link.id]);
+
+  // Takip sayfası: danışan ekranı sahte istemciyle kurulur
+  const { mountTakip } = await import('../js/takip.js');
+  const tRoot = document.createElement('div');
+  await mountTakip(tRoot, sb, token);
+  const tText = tRoot.textContent;
+  check('Takip sayfası: program görünür, kişisel veri görünmez', /r kartları/.test(tText) && /Yavaş konuşun/.test(tText) && !/Gizli Ad|L-1|kekemelik/.test(tText), tText.slice(0, 160));
+  const tBad = document.createElement('div');
+  await mountTakip(tBad, sb, 'kötü<script>');
+  check('Takip sayfası: bozuk anahtarda uyarı', /geçersiz/i.test(tBad.textContent) && !tBad.querySelector('script'));
+
+  await auth.login('zeynep@test.com', 'parola123'); // başka ekip
+  const zL = await sb.from('patient_links').select('*').eq('org_id', orgA);
+  const zH = await sb.from('home_logs').select('*').eq('org_id', orgA);
+  const zI = await sb.from('patient_links').insert({ org_id: orgA, patient_id: pL.id, token_hash: 'a'.repeat(64), expires_at: new Date(Date.now() + 1e9).toISOString() }).select('id');
+  check('Başka ekip bağlantıları ve kayıtları göremez, bağlantı oluşturamaz', !zL.data?.length && !zH.data?.length && (!!zI.error || !zI.data?.length));
+  await auth.logout();
+
+  await auth.login('ayse@test.com', 'yeniParola1');
+  ctxA = await auth.loadContext();
+  repoA = createRepo(ctxA);
+  const logsA = await repoA.links.logs(pL.id);
+  check('Klinisyen günlük kayıtları görür', logsA.length === 1 && logsA[0].done === false && logsA[0].note === 'yorgundu');
+  const tamper = await sb.from('patient_links').update({ expires_at: new Date(Date.now() + 9e10).toISOString(), token_hash: 'b'.repeat(64) }).eq('id', link.id).select('id');
+  check('Bağlantının anahtarı ve süresi sonradan değiştirilemez', !!tamper.error, tamper.error?.message);
+  const hTamper = await sb.from('home_logs').update({ done: true }).eq('patient_id', pL.id).select('id');
+  check('Günlük kayıtlar klinisyen tarafından değiştirilemez', !!hTamper.error, hTamper.error?.message);
+  await repoA.links.revoke(link.id);
+  await auth.logout();
+  const gRev = await sb.rpc('link_get', { p_token: token });
+  const lRev = await sb.rpc('link_log', { p_token: token, p_day: today, p_done: true, p_slot: '', p_note: '' });
+  check('İptal edilen bağlantı okunamaz ve yazılamaz', gRev.data === null && lRev.data === false);
+  await pg.query("update patient_links set revoked_at = null, expires_at = now() - interval '1 day' where id = $1", [link.id]);
+  const gExp = await sb.rpc('link_get', { p_token: token });
+  check('Süresi dolan bağlantı okunamaz', gExp.data === null);
+  await auth.login('ayse@test.com', 'yeniParola1');
+  ctxA = await auth.loadContext();
+  repoA = createRepo(ctxA);
+  await repoA.patients.remove(pL.id);
+  const leftL = (await pg.query('select (select count(*) from patient_links)::int as l, (select count(*) from home_logs)::int as h')).rows[0];
+  check('Danışan silinince bağlantıları ve kayıtları da silinir', leftL.l === 0 && leftL.h === 0, JSON.stringify(leftL));
+  }
+
   // Özet
   const pass = results.filter((r) => r.ok).length;
   sum.textContent = `${pass} / ${results.length} test geçti`;

@@ -774,3 +774,10 @@ table.table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .mat-quiz-opt { min-height: 52px; font-size: 16px; white-space: normal; height: auto; font-family: var(--mono); }
 .mat-quiz-opt.right { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); opacity: 1; }
 .mat-quiz-opt.wrong { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); opacity: 1; }
+/* Terapi planı */
+.plan-goal { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+.plan-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 360px; }
+.plan-day { text-align: center; font-size: 11px; color: var(--muted); }
+.plan-day span { display: grid; place-items: center; aspect-ratio: 1; border-radius: 10px; border: 1.5px solid var(--border-2); margin-bottom: 3px; font-weight: 700; font-size: 14px; }
+.plan-day.done span { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.plan-day.miss span { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }

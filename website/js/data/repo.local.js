@@ -251,9 +251,14 @@ export function createLocalRepo(ctx) {
     },
   };
 
+  // Danışan bağlantısı yalnız bulut modunda çalışır (danışanın cihazı bu tarayıcının verisine erişemez)
+  const noLinks = async () => { throw new Error('Danışan bağlantısı yalnızca bulut veritabanıyla kullanılabilir.'); };
+  const links = { supported: false, create: noLinks, revoke: noLinks, async list() { return []; }, async logs() { return []; } };
+
   return {
     kind: 'local',
     ctx,
+    links,
     patients,
     sessions,
     audio,
