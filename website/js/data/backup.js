@@ -15,7 +15,7 @@ import { uuid } from './crypto.js';
 import { createLocalRepo } from './repo.local.js';
 
 export { extFor } from './mime.js';
-import { extFor } from './mime.js';
+import { extFor, imageExtFor } from './mime.js';
 
 export async function exportBackup(repo, { includeAudio = true, onProgress = () => {} } = {}) {
   const JSZip = await loadJSZip();
@@ -48,6 +48,20 @@ export async function exportBackup(repo, { includeAudio = true, onProgress = () 
   zip.file('sessions.json', encodeTyped(sessions));
   zip.file('lexicon.json', JSON.stringify(lexicon, null, 2));
   zip.file('audio.json', JSON.stringify(audioMeta, null, 2));
+  // Materyal Atölyesi: ekip sözcükleri, görseller ve kayıtlı materyaller
+  if (repo.words && repo.media && repo.materials) {
+    const mediaMeta = [];
+    for (const m of await repo.media.list()) {
+      const full = await repo.media.get(m.id).catch(() => null);
+      if (!full?.blob) continue;
+      const name = `media/${m.id}.${imageExtFor(m.mimeType) || 'jpg'}`;
+      zip.file(name, full.blob);
+      mediaMeta.push({ id: m.id, label: m.label || '', width: m.width || null, height: m.height || null, mimeType: m.mimeType, sizeBytes: m.sizeBytes, file: name });
+    }
+    zip.file('media.json', JSON.stringify(mediaMeta, null, 2));
+    zip.file('words.json', JSON.stringify(await repo.words.list(), null, 2));
+    zip.file('materials.json', JSON.stringify(await repo.materials.list(), null, 2));
+  }
   zip.file('OKUBENI.txt', 'MorphologAI yedek dosyasıdır. Uygulamada Ayarlar → Veri → Yedekten geri yükle ile içe aktarın.\n'
     + 'Bu dosya danışan sağlık verisi içerebilir; güvenli saklayın.\n');
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
@@ -166,7 +180,41 @@ export async function importBackup(repo, file, { onProgress = () => {} } = {}) {
       },
     })),
   }, onProgress);
-  return { ...counts, manifest };
+
+  // Materyal Atölyesi verileri (eski yedeklerde bulunmaz). Görseller yeni kimlik alır; aynı etiket ve
+  // boyutta görsel zaten varsa yeniden yüklenmez. Var olan sözcük ve aynı başlıklı materyal ezilmez.
+  const extra = { media: 0, words: 0, materials: 0 };
+  if (repo.words && repo.media && repo.materials) {
+    const validMedia = (m) => isObj(m) && isId(m.id) && typeof m.file === 'string' && /^media\/[\w-]{1,64}\.(png|jpg|webp)$/i.test(m.file) && ['image/png', 'image/jpeg', 'image/webp'].includes(m.mimeType);
+    const have = await repo.media.list();
+    const idMap = new Map();
+    for (const m of arr(await readJson('media.json', [])).filter(validMedia).slice(0, 5000)) {
+      const dup = have.find((x) => (x.label || '') === (m.label || '') && x.sizeBytes === m.sizeBytes);
+      if (dup) { idMap.set(m.id, dup.id); continue; }
+      const f = zip.file(m.file);
+      if (!f) continue;
+      try {
+        const rec = await repo.media.put(new Blob([await f.async('arraybuffer')], { type: m.mimeType }), { label: String(m.label || '').slice(0, 80), width: Number(m.width) || null, height: Number(m.height) || null });
+        idMap.set(m.id, rec.id);
+        extra.media++;
+      } catch { /* geçersiz görsel atlanır */ }
+    }
+    const haveWords = new Set((await repo.words.list()).map((w) => w.word));
+    for (const w of arr(await readJson('words.json', [])).slice(0, 20000)) {
+      if (!isObj(w) || typeof w.word !== 'string' || !w.word.trim() || w.word.length > 60 || haveWords.has(w.word.trim().toLocaleLowerCase('tr-TR'))) continue;
+      const s = (v, n) => (typeof v === 'string' && v.length <= n ? v : null);
+      try { await repo.words.save({ word: w.word, category: s(w.category, 30), ageBand: s(w.ageBand, 10), mediaId: idMap.get(w.mediaId) || null, hidden: !!w.hidden }); extra.words++; } catch { /* atla */ }
+    }
+    const haveMat = new Set((await repo.materials.list()).map((m) => `${m.kind}|${m.title}`));
+    for (const m of arr(await readJson('materials.json', [])).slice(0, 2000)) {
+      if (!isObj(m) || typeof m.kind !== 'string' || !isObj(m.content) || haveMat.has(`${m.kind}|${m.title}`)) continue;
+      let content = JSON.stringify(m.content);
+      if (content.length > 250000) continue;
+      for (const [from, to] of idMap) content = content.split(`"${from}"`).join(`"${to}"`);
+      try { await repo.materials.save({ kind: m.kind, title: String(m.title || ''), params: isObj(m.params) ? m.params : {}, content: JSON.parse(content) }); extra.materials++; } catch { /* atla */ }
+    }
+  }
+  return { ...counts, ...extra, manifest };
 }
 
 // ---------------------------------------------------------------------------
