@@ -146,6 +146,20 @@ const BUILDERS = {
     { text: 'Bir oyuncu cümlenin başını okur ve yarıda bırakır; diğer oyuncu cümleyi dilediği gibi tamamlar. Sırayla devam edilir. Doğru ya da yanlış yanıt yoktur.', style: 'help', margin: [0, 0, 0, 10] },
     { ol: c.items.map((s) => ({ text: s.text, fontSize: 15, margin: [0, 7, 0, 7] })) },
   ],
+  chat: (c) => [{
+    table: {
+      widths: ['*', '*'],
+      body: chunk(c.items, 2).map((r) => padRow(r.map((it) => ({ text: it.text, fontSize: 15, alignment: 'center', margin: [6, 26, 6, 26] })), 2)),
+      dontBreakRows: true,
+    },
+    layout: boxLayout,
+  }, { text: 'Kartları kesip karıştırın. Sırayla bir kart çekilir ve soru yanıtlanır; yanıt uzunluğu danışanın hedefine göre ayarlanır.', style: 'help', margin: [0, 10, 0, 0] }],
+  story: (c) => [
+    { text: c.sentences.join(' '), fontSize: 15, lineHeight: 1.6, margin: [0, 0, 0, 14] },
+    c.words?.length ? { text: [{ text: 'Hedef sözcükler: ', bold: true }, c.words.join(', ')], fontSize: 11, color: C.muted, margin: [0, 0, 0, 12] } : { text: '' },
+    c.questions?.length ? { text: 'Sorular', style: 'h3' } : { text: '' },
+    { ol: (c.questions || []).map((q) => ({ text: q.text, fontSize: 13, margin: [0, 6, 0, 16] })) },
+  ],
   wh: (c, images) => c.items.map((it) => ({
     columns: [
       it.mediaId && images.get(it.mediaId) ? { image: images.get(it.mediaId), fit: [110, 110], width: 120 } : { text: it.text, fontSize: 18, bold: true, width: 120 },

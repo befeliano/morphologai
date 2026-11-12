@@ -12,7 +12,7 @@
  *  whQuestions    : 5N1K soru kalıpları
  */
 import { trLower } from '../text/normalize.js';
-import { normalizeTarget, positionsOf } from '../text/phonetics.js';
+import { normalizeTarget, positionsOf, toIPAWord } from '../text/phonetics.js';
 
 // ---- tohumlu rastgele ----
 export function rng(seed = 1) {
@@ -396,4 +396,112 @@ export function whQuestions(items, { types = ['ne', 'nerede', 'nasil'], seed = 1
     item: it,
     questions: types.map((t) => ({ type: t, text: WH_TEMPLATES[t][Math.floor(rand() * WH_TEMPLATES[t].length)] })),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Sohbet kartları (akıcılık ve sosyal iletişim çalışmaları)
+// ---------------------------------------------------------------------------
+export const CHAT_TOPICS = [
+  { id: 'tanisma', label: 'Tanışma' }, { id: 'okul', label: 'Okul ve iş' }, { id: 'hobi', label: 'Hobiler' }, { id: 'yemek', label: 'Yemek' },
+  { id: 'aile', label: 'Aile ve arkadaşlar' }, { id: 'hayal', label: 'Hayal gücü' }, { id: 'duygu', label: 'Duygular' }, { id: 'gunluk', label: 'Günlük yaşam' },
+];
+/** level 1: kısa yanıt (tek sözcük / kısa cümle) · 2: birkaç cümle · 3: anlatı ve görüş bildirme */
+const CHAT = {
+  tanisma: [[1, 'Adın ne?'], [1, 'Kaç yaşındasın?'], [1, 'En sevdiğin renk hangisi?'], [2, 'Kendini üç sözcükle nasıl anlatırsın?'], [2, 'Nerede yaşıyorsun, orayı anlatır mısın?'], [3, 'Seni en iyi tanıyan kişi seni nasıl anlatır?'], [3, 'Bugüne kadar öğrendiğin en önemli şey nedir?']],
+  okul: [[1, 'En sevdiğin ders hangisi?'], [1, 'Okula nasıl gidiyorsun?'], [2, 'Okulda ya da işte bir günün nasıl geçer?'], [2, 'En sevdiğin öğretmen kimdi, neden?'], [3, 'Okulda bir şeyi değiştirebilseydin neyi değiştirirdin?'], [3, 'İleride hangi işi yapmak istersin, neden?'], [2, 'Teneffüste ya da molada neler yaparsın?']],
+  hobi: [[1, 'En sevdiğin oyun hangisi?'], [1, 'Hangi sporu seversin?'], [2, 'Boş zamanında neler yaparsın?'], [2, 'En son izlediğin filmi anlatır mısın?'], [3, 'Yeni bir beceri öğrenecek olsan hangisini seçerdin, neden?'], [3, 'Sevdiğin bir oyunun kurallarını hiç bilmeyen birine anlat.'], [2, 'En sevdiğin şarkı ya da şarkıcı kim?']],
+  yemek: [[1, 'En sevdiğin yemek ne?'], [1, 'Kahvaltıda ne yersin?'], [2, 'Hiç sevmediğin bir yiyecek var mı, neden?'], [2, 'En sevdiğin yemeğin nasıl yapıldığını anlat.'], [3, 'Bir lokanta açsan menüde neler olurdu?'], [3, 'Unutamadığın bir sofrayı anlat.'], [1, 'Tatlı mı seversin, tuzlu mu?']],
+  aile: [[1, 'Kardeşin var mı?'], [1, 'En yakın arkadaşının adı ne?'], [2, 'Ailenle birlikte yapmayı sevdiğin şey nedir?'], [2, 'En yakın arkadaşınla nasıl tanıştınız?'], [3, 'İyi bir arkadaş nasıl olmalı?'], [3, 'Ailenle geçirdiğin güzel bir günü anlat.'], [2, 'Evde en çok kiminle konuşursun?']],
+  hayal: [[1, 'Bir süper gücün olsa ne olurdu?'], [1, 'Hangi hayvan olmak isterdin?'], [2, 'Üç dileğin olsa neler dilerdin?'], [2, 'Zamanda yolculuk yapabilsen nereye giderdin?'], [3, 'Issız bir adaya düşsen yanına hangi üç şeyi alırdın, neden?'], [3, 'Kendi gezegenini kursan orada kurallar ne olurdu?'], [2, 'Görünmez olsan ilk ne yapardın?']],
+  duygu: [[1, 'Bugün nasılsın?'], [1, 'Seni en çok ne güldürür?'], [2, 'Seni mutlu eden üç şey nedir?'], [2, 'Sinirlendiğinde ne yaparsın?'], [3, 'Çok heyecanlandığın bir anı anlat.'], [3, 'Bir arkadaşın üzgün olsa ona nasıl yardım edersin?'], [2, 'En son neye şaşırdın?']],
+  gunluk: [[1, 'Sabah kaçta kalkarsın?'], [1, 'Bugün hava nasıl?'], [2, 'Dün neler yaptın?'], [2, 'Hafta sonu için planın ne?'], [3, 'Sıradan bir gününü baştan sona anlat.'], [3, 'Yaşadığın yerde en sevdiğin yer neresi, neden?'], [2, 'Akşamları evde neler yaparsın?']],
+};
+export function chatCards({ topics = [], level = 0, count = 12, seed = 1 } = {}) {
+  const rand = rng(seed);
+  const ts = topics.length ? topics : Object.keys(CHAT);
+  const pool = ts.flatMap((t) => (CHAT[t] || []).filter(([lv]) => !level || lv === level).map(([lv, text]) => ({ text, topic: t, level: lv })));
+  return shuffle(pool, rand).slice(0, count);
+}
+
+// ---------------------------------------------------------------------------
+// Hedef sözcüklü kısa hikâye (kalıp tabanlı, yapay zekâsız)
+// ---------------------------------------------------------------------------
+const STORY_OPEN = ['Bir sabah {hero} erkenden uyandı ve dışarı çıktı.', 'Güneşli bir günde {hero} yürüyüşe çıktı.', 'Bir gün {hero} evin önünde oynuyordu.', 'Tatilin ilk günü {hero} çok heyecanlıydı.'];
+const STORY_FRAMES = [
+  'Yolda bir {w} gördü.', 'Biraz ileride karşısına bir {w} çıktı.', 'Tam o sırada bir {w} dikkatini çekti.', 'Köşeyi dönünce bir {w} daha gördü.',
+  '"Bu bir {w}!" diye bağırdı.', 'Yanında bir {w} vardı.', 'Biraz sonra bir {w} gördü.', 'Uzakta bir {w} duruyordu.', 'Arkasına bakınca bir {w} gördü.',
+];
+const STORY_MID = ['{hero} çok şaşırdı.', 'Buna çok sevindi.', '{hero} gülümsedi ve yoluna devam etti.', 'Bir süre durup izledi.', 'Hemen yanına gitti.'];
+const STORY_CLOSE = ['Akşam olunca {hero} eve döndü ve gördüklerini ailesine anlattı.', 'Günün sonunda {hero} çok yorulmuştu ama mutluydu.', '{hero} o günü hiç unutmadı.'];
+
+/**
+ * @param {string[]} words hedef sözcükler (yalın hâlde, ad)  @param {object} o { hero, seed }
+ * @returns {{title, text, sentences: string[], questions: Array<{text, answer}>}}
+ */
+export function templateStory(words, { hero = 'Deniz', seed = 1 } = {}) {
+  const rand = rng(seed);
+  const ws = words.map((w) => trLower(wordOf(w)).trim()).filter(Boolean).slice(0, 10);
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+  const fill = (s, w) => s.replaceAll('{hero}', hero).replaceAll('{w}', w || '');
+  const sentences = [fill(pick(STORY_OPEN))];
+  const frames = shuffle(STORY_FRAMES, rand);
+  ws.forEach((w, i) => {
+    sentences.push(fill(frames[i % frames.length], w));
+    if (i % 2 === 1 || i === ws.length - 1) sentences.push(fill(pick(STORY_MID)));
+  });
+  sentences.push(fill(pick(STORY_CLOSE)));
+  const questions = [];
+  if (ws.length) {
+    questions.push({ text: `${hero} ilk önce ne gördü?`, answer: ws[0] });
+    questions.push({ text: 'Hikâyede hangi sözcükler geçti? Hatırladıklarını söyle.', answer: ws.join(', ') });
+    if (ws.length > 1) questions.push({ text: `Doğru mu, yanlış mı: ${hero} bir ${ws[1]} gördü.`, answer: 'Doğru' });
+    questions.push({ text: `Hikâyenin sonunda ${hero} ne yaptı?`, answer: sentences[sentences.length - 1] });
+    questions.push({ text: `Sen ${hero} olsaydın ne yapardın?`, answer: '(serbest yanıt)' });
+  }
+  return { title: `${hero} ve ${ws[0] || 'macera'}`, text: sentences.join(' '), sentences, questions };
+}
+
+// ---------------------------------------------------------------------------
+// IPA alıştırması
+// ---------------------------------------------------------------------------
+/** Türkçe harf ↔ IPA simgesi (harfle aynı olmayanlar) */
+export const IPA_SYMBOLS = [
+  { letter: 'c', ipa: 'dʒ', ex: 'cam' }, { letter: 'ç', ipa: 'tʃ', ex: 'çay' }, { letter: 'ş', ipa: 'ʃ', ex: 'şal' }, { letter: 'j', ipa: 'ʒ', ex: 'jeton' },
+  { letter: 'y', ipa: 'j', ex: 'yol' }, { letter: 'ı', ipa: 'ɯ', ex: 'ılık' }, { letter: 'ö', ipa: 'œ', ex: 'göz' }, { letter: 'ü', ipa: 'y', ex: 'gül' },
+  { letter: 'r', ipa: 'ɾ', ex: 'ray' }, { letter: 'k (ince)', ipa: 'c', ex: 'kedi' }, { letter: 'g (ince)', ipa: 'ɟ', ex: 'gel' }, { letter: 'l (kalın)', ipa: 'ɫ', ex: 'bal' },
+  { letter: 'n (k/g önünde)', ipa: 'ŋ', ex: 'renk' }, { letter: 'ğ (uzatma)', ipa: 'ː', ex: 'dağ' },
+];
+/**
+ * mode: 'symbol' (simge → harf), 'toipa' (sözcük → IPA), 'toword' (IPA → sözcük)
+ * level: 1 (tek heceli) · 2 (iki heceli) · 3 (üç ve daha çok heceli)
+ * @returns {Array<{prompt, options: string[], answer: number, note}>}
+ */
+export function ipaQuiz(bank, { mode = 'toipa', level = 1, count = 10, seed = 1 } = {}) {
+  const rand = rng(seed);
+  const out = [];
+  if (mode === 'symbol') {
+    for (const s of shuffle(IPA_SYMBOLS, rand).slice(0, count)) {
+      const others = shuffle(IPA_SYMBOLS.filter((x) => x.ipa !== s.ipa), rand).slice(0, 3).map((x) => x.letter);
+      const options = shuffle([s.letter, ...others], rand);
+      out.push({ prompt: `[${s.ipa}]`, options, answer: options.indexOf(s.letter), note: `${s.ex} → /${toIPAWord(s.ex)}/` });
+    }
+    return out;
+  }
+  const vowels = (w) => (w.match(/[aeıioöuüâîû]/g) || []).length;
+  const pool = bank.map(wordOf).filter((w) => (level === 1 ? vowels(w) === 1 : level === 2 ? vowels(w) === 2 : vowels(w) >= 3));
+  for (const w of shuffle(pool, rand)) {
+    if (out.length >= count) break;
+    const ipa = toIPAWord(w);
+    // Çeldiriciler: benzer uzunlukta, IPA yazımı farklı sözcükler
+    const cands = shuffle(pool.filter((x) => x !== w && Math.abs(x.length - w.length) <= 1 && toIPAWord(x) !== ipa), rand).slice(0, 3);
+    if (cands.length < 3) continue;
+    if (mode === 'toipa') {
+      const options = shuffle([ipa, ...cands.map((x) => toIPAWord(x))], rand).map((x) => `/${x}/`);
+      out.push({ prompt: w, options, answer: options.indexOf(`/${ipa}/`), note: '' });
+    } else {
+      const options = shuffle([w, ...cands], rand);
+      out.push({ prompt: `/${ipa}/`, options, answer: options.indexOf(w), note: '' });
+    }
+  }
+  return out;
 }

@@ -9,7 +9,7 @@ import { toIPA, highlightParts, normalizeTarget } from '../../core/text/phonetic
 import { buildBank, filterWords, CATEGORIES, AGE_BANDS, POSITIONS, SEED_WORDS } from '../../core/materials/wordbank.js';
 import {
   minimalPairs, PAIR_SETS, twoWordPhrases, wordSearch, scramble, crossword, letterMaze, sentenceStems, STEM_TOPICS, STEM_TENSES,
-  whQuestions, WH_TYPES, shuffle, rng,
+  whQuestions, WH_TYPES, shuffle, rng, chatCards, CHAT_TOPICS, templateStory, ipaQuiz,
 } from '../../core/materials/generators.js';
 import { buildMaterialPdf } from '../../export/materialPdf.js';
 
@@ -21,13 +21,16 @@ const TOOLS = [
   { id: 'puzzle', label: 'Bulmaca', icon: 'hash', hint: 'Sözcük avı, karışık harfler, çengel bulmaca, labirent' },
   { id: 'stems', label: 'Cümle tamamlama', icon: 'note', hint: 'Konu ve zamana göre yarım cümleler' },
   { id: 'wh', label: '5N1K', icon: 'info', hint: 'Kim, ne, nerede, ne zaman, neden, nasıl soruları' },
+  { id: 'chat', label: 'Sohbet kartları', icon: 'users', hint: 'Akıcılık ve sosyal iletişim için konuşma kartları' },
+  { id: 'story', label: 'Hikâye', icon: 'fileText', hint: 'Hedef sözcükleri içeren kısa hikâye ve sorular (kalıp tabanlı)' },
   { id: 'ipa', label: 'IPA çevirici', icon: 'voice', hint: 'Türkçe metni IPA yazımına çevirir' },
+  { id: 'ipaquiz', label: 'IPA alıştırması', icon: 'checkCircle', hint: 'IPA simgelerini tanıma ve okuma alıştırmaları' },
   { id: 'media', label: 'Görsellerim', icon: 'folder', hint: 'Kendi görsellerinizi yükleyin ve sözcüklere bağlayın' },
   { id: 'bank', label: 'Sözcük bankası', icon: 'book', hint: 'Ekibin sözcükleri, kategori ve yaş etiketleri' },
   { id: 'saved', label: 'Kayıtlı', icon: 'save', hint: 'Kaydedilen materyaller' },
 ];
 
-const KIND_LABEL = { cards: 'Kartlar', list: 'Liste', worksheet: 'Çalışma sayfası', pairs: 'Minimal çift', phrases: 'İkili ifade', matching: 'Eşleştirme', wordsearch: 'Sözcük avı', scramble: 'Karışık harfler', crossword: 'Çengel bulmaca', maze: 'Labirent', stems: 'Cümle tamamlama', wh: '5N1K' };
+const KIND_LABEL = { cards: 'Kartlar', list: 'Liste', worksheet: 'Çalışma sayfası', pairs: 'Minimal çift', phrases: 'İkili ifade', matching: 'Eşleştirme', wordsearch: 'Sözcük avı', scramble: 'Karışık harfler', crossword: 'Çengel bulmaca', maze: 'Labirent', stems: 'Cümle tamamlama', wh: '5N1K', chat: 'Sohbet kartları', story: 'Hikâye' };
 
 /** Görseli küçültüp JPEG'e çevirir (beyaz zemin; en uzun kenar ≤ max). */
 async function toJpeg(blob, max = 1024, quality = 0.86) {
@@ -248,6 +251,8 @@ export async function render(root, { query }, app) {
       case 'stems': return h('ol.mat-list', null, c.items.map((s) => h('li', null, s.text)));
       case 'wh': return h('div', null, c.items.map((it) => h('div.row', { style: { gap: '14px', padding: '10px 0', borderBottom: '1px solid var(--border)', alignItems: 'flex-start' } },
         img(it.mediaId, 72, it.text), h('div', null, h('b', null, it.text), h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } }, it.questions.map((q) => h('li', null, q.text)))))));
+      case 'chat': return h('div.mat-cards', { style: { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } }, c.items.map((it) => h('div.mat-card', { style: { padding: '18px 10px' } }, it.text)));
+      case 'story': return h('div', null, h('p', { style: { fontSize: '15px', lineHeight: 1.7 } }, c.sentences.join(' ')), h('ol.mat-list', { style: { fontSize: '14px', lineHeight: 1.7 } }, (c.questions || []).map((q) => h('li', null, q.text))));
       default: return h('p.muted', null, 'Önizleme yok.');
     }
   }
@@ -482,6 +487,113 @@ export async function render(root, { query }, app) {
       });
       picker.run().then(t.refresh);
       return t.el;
+    },
+
+    chat() {
+      const topicBox = CHAT_TOPICS.map((p) => ({ p, cb: h('input', { type: 'checkbox' }) }));
+      const level = select([{ id: '0', label: 'Karışık' }, { id: '1', label: 'Kısa yanıt (tek sözcük, kısa cümle)' }, { id: '2', label: 'Birkaç cümle' }, { id: '3', label: 'Anlatı ve görüş' }], '0');
+      const count = h('input.input', { type: 'number', min: 2, max: 30, value: 12, style: { width: '84px' } });
+      const seed = seedInput();
+      const editor = h('textarea.textarea', { rows: 10 });
+      let manual = false;
+      const t = toolLayout({
+        defaultTitle: 'Sohbet kartları',
+        controls: (refresh) => {
+          const regen = () => { manual = false; refresh(); };
+          for (const el of [level, ...topicBox.map((x) => x.cb)]) el.addEventListener('change', regen);
+          for (const el of [count, seed]) el.addEventListener('input', regen);
+          editor.addEventListener('input', () => { manual = true; refresh(); });
+          return h('div', null,
+            h('div.field', null, h('label', null, 'Konular'), h('div.mat-checks', null, topicBox.map((x) => h('label.check', null, x.cb, h('span', null, x.p.label))))),
+            h('div.form-grid.mt-2', null, field('Yanıt düzeyi', level, 'Akıcılık çalışmasında kısa yanıtlardan anlatıya doğru ilerleyin.'), field('Kart sayısı', count)),
+            h('div.row.mt-2', { style: { gap: '10px', alignItems: 'center' } }, h('span.small', null, 'Tohum'), seed, reroll(seed, regen)),
+            h('div.mt-2', null, field('Kartlar (her satır bir kart; kendi sorularınızı ekleyebilirsiniz)', editor)),
+            h('p.tiny.muted', null, 'Bazı konular danışan için hassas olabilir; kartları seans öncesinde gözden geçirin ve uygun olmayanları silin.'));
+        },
+        build: () => {
+          if (!manual) editor.value = chatCards({ topics: topicBox.filter((x) => x.cb.checked).map((x) => x.p.id), level: Number(level.value), count: Number(count.value) || 12, seed: Number(seed.value) || 1 }).map((c) => c.text).join('\n');
+          const items = editor.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 40).map((text) => ({ text: text.slice(0, 200) }));
+          return items.length ? { kind: 'chat', params: { level: level.value }, content: { items } } : null;
+        },
+      });
+      t.refresh();
+      return t.el;
+    },
+
+    story() {
+      const hero = h('input.input', { value: 'Deniz', maxlength: 30 });
+      const seed = seedInput();
+      const editor = h('textarea.textarea', { rows: 8 });
+      let manual = false;
+      let picker;
+      const t = toolLayout({
+        defaultTitle: 'Hikâye',
+        controls: (refresh) => {
+          const regen = () => { manual = false; refresh(); };
+          picker = wordPicker({ onChange: regen, max: 5, defaults: { targets: query.ses || '', category: 'hayvan' } });
+          for (const el of [hero, seed]) el.addEventListener('input', regen);
+          editor.addEventListener('input', () => { manual = true; refresh(); });
+          return h('div', null,
+            h('div.form-grid', null, field('Kahramanın adı', hero, 'Danışanın adını ya da sevdiği bir adı yazabilirsiniz.'),
+              h('div.field', null, h('label', null, 'Tohum'), h('div.row', { style: { gap: '10px' } }, seed, reroll(seed, regen)))),
+            h('div.mt-2', null, field('Hikâye metni (düzenleyebilirsiniz)', editor)),
+            h('p.tiny.muted', null, 'Hikâye, hedef sözcükleri hazır cümle kalıplarına yerleştirerek kurulur (yapay zekâ kullanılmaz). Sözcükler yalın hâlde ve ad olarak kullanılır; eylem ya da sıfat seçerseniz metni düzeltin.'),
+            h('div.divider'), picker.el);
+        },
+        build: () => {
+          const ws = picker.words.map((w) => w.word);
+          if (!ws.length) return null;
+          const st = templateStory(ws, { hero: hero.value.trim() || 'Deniz', seed: Number(seed.value) || 1 });
+          if (!manual) editor.value = st.sentences.join('\n');
+          const sentences = editor.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 60).map((s) => s.slice(0, 300));
+          return { kind: 'story', params: picker.filter, content: { sentences, words: ws, questions: st.questions.map((q) => ({ text: q.text })) }, title: st.title };
+        },
+      });
+      picker.run().then(t.refresh);
+      return t.el;
+    },
+
+    ipaquiz() {
+      const mode = select([{ id: 'symbol', label: 'Simgeyi tanı (simge → harf)' }, { id: 'toipa', label: 'Sözcüğü IPA ile yaz (sözcük → IPA)' }, { id: 'toword', label: 'IPA yazımını oku (IPA → sözcük)' }], 'symbol');
+      const level = select([{ id: '1', label: 'Temel (tek heceli)' }, { id: '2', label: 'Orta (iki heceli)' }, { id: '3', label: 'İleri (üç ve daha çok heceli)' }], '1');
+      const host = h('div');
+      const KEY = 'morphologai.ipaquiz';
+      const stats = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })();
+      const start = () => {
+        const qs = ipaQuiz(bank(), { mode: mode.value, level: Number(level.value), count: 10, seed: 1 + Math.floor(Math.random() * 99999) });
+        let i = 0; let ok = 0;
+        const draw = () => {
+          if (i >= qs.length) {
+            const k = `${mode.value}:${level.value}`;
+            stats[k] = { best: Math.max(stats[k]?.best || 0, ok), runs: (stats[k]?.runs || 0) + 1 };
+            try { localStorage.setItem(KEY, JSON.stringify(stats)); } catch { /* yok say */ }
+            mount(host, h('div.empty', null, h('h3', null, `${ok} / ${qs.length} doğru`), h('p', null, `Bu modda en iyi sonucunuz: ${stats[k].best} / 10 · ${stats[k].runs} deneme`),
+              h('button.btn.btn-primary', { on: { click: start } }, icon('refresh', 16), 'Yeniden başla')));
+            return;
+          }
+          const q = qs[i];
+          const fb = h('div.small.mt-2', { 'aria-live': 'polite' });
+          const btns = q.options.map((o, oi) => {
+            const b = h('button.btn.btn-ghost.mat-quiz-opt', { type: 'button' }, o);
+            b.addEventListener('click', () => {
+              const right = oi === q.answer;
+              if (right) ok++;
+              btns.forEach((x, xi) => { x.disabled = true; if (xi === q.answer) x.classList.add('right'); else if (xi === oi) x.classList.add('wrong'); });
+              mount(fb, h('b', { style: { color: right ? 'var(--ok)' : 'var(--danger)' } }, right ? 'Doğru. ' : `Yanlış. Doğru yanıt: ${q.options[q.answer]}. `), q.note || '',
+                h('button.btn.btn-primary.btn-sm', { style: { marginLeft: '10px' }, on: { click: () => { i++; draw(); } } }, i === qs.length - 1 ? 'Sonucu gör' : 'Sonraki'));
+            });
+            return b;
+          });
+          mount(host, h('div.small.muted', null, `Soru ${i + 1} / ${qs.length} · ${ok} doğru`), h('div.mat-quiz-prompt', null, q.prompt), h('div.mat-quiz-opts', null, btns), fb);
+        };
+        if (!qs.length) mount(host, h('p.small.muted', null, 'Bu düzey için yeterli sözcük yok.')); else draw();
+      };
+      mode.addEventListener('change', start);
+      level.addEventListener('change', start);
+      start();
+      return h('div.card', { style: { maxWidth: '760px' } }, h('div.card-head', null, h('h3', null, icon('voice', 17), 'IPA alıştırması')),
+        h('div.card-body', null, h('div.form-grid', null, field('Alıştırma türü', mode), field('Düzey (sözcük alıştırmalarında)', level)), h('div.divider'), host,
+          h('p.tiny.muted.mt-3', null, 'Alıştırmalar ölçünlü Türkçe sesletime ve bu uygulamanın IPA kurallarına göredir; öğrenmeyi destekler, başvuru kaynağı yerine geçmez. İlerlemeniz yalnızca bu tarayıcıda saklanır.')));
     },
 
     ipa() {
